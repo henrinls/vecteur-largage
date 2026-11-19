@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.9.3';
+const VERSION = '0.9.4';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -758,16 +758,20 @@ HYP.concat(['hOpen']).forEach(k => {
 // Avion : vitesses de largage (badin, nœuds) ; « Saisie manuelle » pour une autre valeur
 const AIRCRAFT = { pc6: ['Pilatus PC-6', 70], c208: ['Cessna Caravan', 85], dhc6: ['Twin Otter', 85], cn235: ['CASA CN235', 110], a400: ['A400M / C-130J', 130] };
 const acName = () => { const t = AIRCRAFT[current.params.acType]; return t && Math.round(current.params.acMs * KT) === t[1] ? t[0] : 'Avion'; };
-$('p_acType').addEventListener('change', e => {
-  const t = e.target.value; setParam('acType', t);
+// Choix de l'avion : dans les Paramètres et dans le panneau 🕑 (même réglage)
+['p_acType', 'j_acType'].forEach(id => $(id).addEventListener('change', e => {
+  const t = e.target.value;
+  if (t === 'manual' && id === 'j_acType') { setParam('acType', 'manual'); fillAc(); toast('Vitesse à saisir dans ⚙ Paramètres'); return; }
+  setParam('acType', t);
   if (AIRCRAFT[t]) setParam('acMs', Math.round(AIRCRAFT[t][1] / KT * 10) / 10);
   current.offsetManual = null; persist(); redraw(); fillAc();
-});
+}));
 // Vitesse de largage de l'avion : nœuds et m/s liés (stockée en m/s)
 function fillAc() {
   const ms = +current.params.acMs || 0;
   const ty = AIRCRAFT[current.params.acType];
-  $('p_acType').value = ty && Math.round(ms * KT) === ty[1] ? current.params.acType : 'manual'; // vitesse modifiée à la main → « Saisie manuelle »
+  const tv = ty && Math.round(ms * KT) === ty[1] ? current.params.acType : 'manual'; // vitesse modifiée à la main → « Saisie manuelle »
+  ['p_acType', 'j_acType'].forEach(id => { const s = $(id); const m = s.querySelector && s.querySelector('option[value="manual"]'); if (m) m.textContent = `Saisie manuelle — ${Math.round(ms * KT)} kt`; s.value = tv; });
   if (document.activeElement !== $('p_acKt')) $('p_acKt').value = Math.round(ms * KT);
   if (document.activeElement !== $('p_acMs')) $('p_acMs').value = fmt1(ms);
 }
@@ -790,7 +794,8 @@ $('z_elev').addEventListener('change', e => { const raw = e.target.value.trim();
 function syncQuick() {
   const p = current.params;
   const flQ = sol && sol.flRel ? Math.round(sol.flRel) : Math.round(p.relMode === 'FL' ? p.relFL : aglToFl(+p.relAGL, prof, elevOf(current, wxRec)));
-  $('qWhen').innerHTML = `🕑 ${fmtWhen(current.when)}<br><b>FL${flQ}</b><br>ouv. ${fmtInt(p.hOpen)} m`; // un seul bouton : date, heure, largage, ouverture
+  const AC_SHORT = { pc6: 'PC-6', c208: 'Caravan', dhc6: 'Twin Otter', cn235: 'CN235', a400: 'A400M' }, acT = AIRCRAFT[p.acType] && Math.round(p.acMs * KT) === AIRCRAFT[p.acType][1] ? AC_SHORT[p.acType] : `${Math.round(p.acMs * KT)} kt`;
+  $('qWhen').innerHTML = `🕑 ${fmtWhen(current.when)}<br><b>FL${flQ}</b><br>ouv. ${fmtInt(p.hOpen)} m<br>✈ ${acT}`; // un seul bouton : date, heure, largage, ouverture
   $('qZero').classList.toggle('on', zeroWind);
   $('qRelax').classList.toggle('on', !!current.show.relax); $('qLabel').classList.toggle('on', current.show.label !== false); $('qTicks').classList.toggle('on', !!current.show.rose);
   $('qRev').classList.toggle('on', !!current.reversed);
@@ -832,7 +837,7 @@ async function ensureWx(force, date) {
   finally { wxBusy = false; redraw(); setTimeout(() => fillInputs(true), 0); syncJump(); }
 }
 function setWhen(w) { current.holdWx = false; current.when = w; current.offsetManual = null; persist(); redraw(); syncJump(); ensureWx(false); }
-$('qWhen').addEventListener('click', () => $('jumpBox').classList.toggle('hidden'));
+$('qWhen').addEventListener('click', () => { const b = $('jumpBox'); b.style.left = Math.round($('quick').getBoundingClientRect().right + 6) + 'px'; b.classList.toggle('hidden'); }); // fenêtre calée à droite de la colonne, quelle que soit sa largeur
 $('jumpOk').addEventListener('click', () => { $('jumpBox').classList.add('hidden'); if (sol && sol.ok) fitFigure(); });
 $('j_minus').addEventListener('click', () => setWhen(shiftWhen(current.when, -1)));
 $('j_plus').addEventListener('click', () => setWhen(shiftWhen(current.when, 1)));

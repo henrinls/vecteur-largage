@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>vecteur-largage</title>
 <link rel="stylesheet" href="vendor/leaflet.css">
-<link rel="stylesheet" href="style.css?v=0.9.3">
+<link rel="stylesheet" href="style.css?v=0.9.4">
 </head>
 <body>
 <div id="map"></div>
@@ -53,6 +53,14 @@
     <div><label>= m sol</label><input id="j_relAGL" inputmode="numeric"></div>
     <div><label>Ouverture (m sol)</label><input id="j_hOpen" inputmode="numeric"></div>
   </div>
+  <div class="row jac"><label>Avion</label><select id="j_acType" title="Avion (vitesse de largage badin)">
+        <option value="pc6">Pilatus PC-6 — 70 kt</option>
+        <option value="c208">Cessna Caravan — 85 kt</option>
+        <option value="dhc6">Twin Otter — 85 kt</option>
+        <option value="cn235">CASA CN235 — 110 kt</option>
+        <option value="a400">A400M / C-130J — 130 kt</option>
+        <option value="manual">Saisie manuelle</option>
+      </select></div>
   <p class="hint" id="wxInfo"></p>
   <p class="hint" id="whyInfo"></p>
   <button id="jumpOk" class="wide primary">OK</button>
@@ -211,12 +219,12 @@
 
 <div id="toast" class="hidden"></div>
 
-<script src="vendor/leaflet.js?v=0.9.3"></script>
-<script src="vendor/leaflet-rotate.js?v=0.9.3"></script>
-<script src="geo.js?v=0.9.3"></script>
-<script src="clubs.js?v=0.9.3"></script>
-<script src="wmm.js?v=0.9.3"></script>
-<script src="app.js?v=0.9.3"></script>
-<script src="photo.js?v=0.9.3"></script>
+<script src="vendor/leaflet.js?v=0.9.4"></script>
+<script src="vendor/leaflet-rotate.js?v=0.9.4"></script>
+<script src="geo.js?v=0.9.4"></script>
+<script src="clubs.js?v=0.9.4"></script>
+<script src="wmm.js?v=0.9.4"></script>
+<script src="app.js?v=0.9.4"></script>
+<script src="photo.js?v=0.9.4"></script>
 </body>
 </html>
