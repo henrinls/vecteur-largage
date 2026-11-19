@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.9.1';
+const VERSION = '0.9.2';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -262,7 +262,7 @@ function projection(Vair, vff) {
 // Nombre de sorties sur le vecteur. Deux paras qui sortent à D secondes d'intervalle ont la même projection et traversent
 // les mêmes vents aux mêmes hauteurs : une fois la projection finie, et donc à l'ouverture, ils sont séparés de D × vitesse sol
 // de l'avion. Intervalle = séparation ÷ vitesse sol (règle pratique), arrondi à la seconde au-dessus.
-// (Avant v0.9.1 : on exigeait la séparation dès la sortie, pendant la projection du premier → 13 s au lieu de 7 s par vent nul.)
+// (Avant v0.9.2 : on exigeait la séparation dès la sortie, pendant la projection du premier → 13 s au lieu de 7 s par vent nul.)
 function exitsOn(sol, prof, p) {
   const sep = +p.sep || 300, u = sol.u, wr = windAt(prof, sol.hRel), Vg = sol.tas + wr.u * u.x + wr.v * u.y; // vitesse sol le long de l'axe
   if (!(Vg > 3)) return { n: 1, dt: null, s: null, Vg, sep };
@@ -382,6 +382,19 @@ function solve(z, prof, rec) {
   out.start = Geo.fromLocal(ch.prv, A); out.end = Geo.fromLocal(ch.prv, B); out.length = seg.b - seg.a;
   out.offsetUsed = bo + (C0.x * r.x + C0.y * r.y); out.tUsed = (seg.a + seg.b) / 2 + (C0.x * u.x + C0.y * u.y);
   out.u = u; out.exits = exitsOn(out, prof, p, proj);
+  // Dernier para (Henri, 19/11/2026) : il ne fait pas les 15 s perpendiculaires (personne derrière lui pour lui tomber dessus).
+  // Il peut donc sortir au-delà de la zone en pointillés, jusqu'au cercle sans les 15 s, au plus un intervalle plus loin
+  // (l'avant-dernier reste ainsi dans la zone avec les 15 s).
+  out.lastExtra = 0;
+  const sp = out.exits && out.exits.s;
+  if (sp) {
+    const rc = out.relax.c, Rr = out.relax.R, bx = B.x - rc.x, by = B.y - rc.y, bu = bx * u.x + by * u.y, disc = bu * bu - (bx * bx + by * by - Rr * Rr);
+    const e = Math.max(0, Math.min(disc > 0 ? -bu + Math.sqrt(disc) : 0, sp));
+    if (e > 0.5) {
+      out.lastExtra = e; out.length += e; out.end = Geo.fromLocal(ch.prv, { x: B.x + e * u.x, y: B.y + e * u.y });
+      out.exits.n = Math.floor(out.length / sp + 1e-6) + 1;
+    }
+  }
   out.ok = true; return out;
 }
 // Zone réelle de largage (avec les 15 s perpendiculaires, union des deux côtés) : « patatoïde », par rayons depuis son centre
@@ -704,7 +717,7 @@ function updateInfo() {
   const ex = sol && sol.ok && sol.exits;
   $('whyInfo').innerHTML = sol && sol.ok ? (ex && ex.dt ? `<b>${ex.n} sortie${ex.n > 1 ? 's' : ''}</b> : une toutes les <b>${fmt1(ex.dt)} s</b> (${fmtInt(ex.s)} m au sol, vitesse sol de l'avion ${Math.round(ex.Vg * KT)} kt) pour rester à ${ex.sep} m les uns des autres. ` : '') +
     `${acName()} : ${Math.round(sol.tas * KT)} kt de vitesse vraie à FL${Math.round(sol.flRel)} (${Math.round(current.params.acMs * KT)} kt badin). Chute libre de ${Math.round(sol.Tff)} s jusqu'à ${fmtInt(sol.hOpen)} m sol (${Math.round(sol.z10)} m les 10 premières secondes, le temps d'accélérer), puis ouverture en ${fmt1(sol.tOpen)} s (freinage de ${current.params.vff} à ${current.params.vz} m/s sur ${current.params.openLoss} m) : projection ${fmtInt(sol.throwDist)} m + dérive, au total <b>${fmtDist(Math.hypot(sol.dFF.x, sol.dFF.y))}</b> vers le ${hdg(n360(Math.atan2(sol.dFF.x, sol.dFF.y) * 180 / Math.PI))}. ` +
-    `Sous voile : vent moyen <b>${Math.round(sol.canopyWind.spd * KT)} kt</b> pour ${Math.round(sol.Va * KT)} kt de vitesse propre` +
+    `${sol.lastExtra > 0.5 ? `Le dernier para ne fait pas les 15 s perpendiculaires : vecteur allongé de ${fmtInt(sol.lastExtra)} m à la fin. ` : ''}Sous voile : vent moyen <b>${Math.round(sol.canopyWind.spd * KT)} kt</b> pour ${Math.round(sol.Va * KT)} kt de vitesse propre` +
     (sol.canopyWind.spd >= sol.Va ? ' <b class="warn">→ tu ne remontes pas au vent : il faut ouvrir au vent du PRV.</b>' : '.') : '';
   $('elevAuto').textContent = typeof current.elevAuto === 'number' ? `automatique : ${current.elevAuto} m` : 'automatique : inconnue (pas encore de prévision)';
 }
@@ -1421,7 +1434,7 @@ async function renderPdfCanvas() {
   [
     (zeroWind ? 'TEST VENT FORCÉ À 0 · ' : '') + `Vent de largage : ${hdg(sol.windRel.dir)} ${Math.round(sol.windRel.spd * KT)} kt (${fmt1(sol.windRel.spd)} m/s) · ${acName()} ${Math.round(p.acMs * KT)} kt badin (${Math.round(sol.tas * KT)} kt vraie)`,
     `Chute ${p.vff} m/s · perte à l'ouverture ${p.openLoss} m`,
-    `${p.perpTime} s perpendiculaire · Vz ${fmt1(+p.vz)} m/s · finesse ${fmt1(+p.glide)}`,
+    `${p.perpTime} s perpendiculaire (sauf le dernier) · Vz ${fmt1(+p.vz)} m/s · finesse ${fmt1(+p.glide)}`,
     `Arrivée au PRV à ${p.hMin} m minimum · marge de sécurité ${sol.margin} % · terrain ${Math.round(sol.elev)} m`,
     `Déclinaison ${fmt1(sol.decl)}° · vents détaillés en page 2`
   ].forEach((s2, i) => tx(s2, col2, l0 + i * lh, '#eee'));
