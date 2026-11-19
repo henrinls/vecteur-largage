@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>vecteur-largage</title>
 <link rel="stylesheet" href="vendor/leaflet.css">
-<link rel="stylesheet" href="style.css?v=0.6.2">
+<link rel="stylesheet" href="style.css?v=0.7.0">
 </head>
 <body>
 <div id="map"></div>
@@ -45,7 +45,8 @@
 </nav>
 
 <div id="jumpBox" class="hidden">
-  <div class="when"><button id="j_minus">−1 h</button><input type="date" id="j_date"><span class="hr" id="j_hour"></span><button id="j_plus">+1 h</button></div>
+  <div class="when"><input type="date" id="j_date"></div>
+  <div class="when"><button id="j_minus">−1 h</button><select class="hr" id="j_hour" title="Heure du saut"><option value="00">00 h</option><option value="01">01 h</option><option value="02">02 h</option><option value="03">03 h</option><option value="04">04 h</option><option value="05">05 h</option><option value="06">06 h</option><option value="07">07 h</option><option value="08">08 h</option><option value="09">09 h</option><option value="10">10 h</option><option value="11">11 h</option><option value="12">12 h</option><option value="13">13 h</option><option value="14">14 h</option><option value="15">15 h</option><option value="16">16 h</option><option value="17">17 h</option><option value="18">18 h</option><option value="19">19 h</option><option value="20">20 h</option><option value="21">21 h</option><option value="22">22 h</option><option value="23">23 h</option></select><button id="j_plus">+1 h</button></div>
   <div class="row"><button id="j_now" class="wide">🔄 Maintenant (mettre à jour la prévision)</button></div>
   <div class="jrow">
     <div><label>Largage (FL)</label><input id="j_relFL" inputmode="numeric"></div>
@@ -58,7 +59,7 @@
 </div>
 
 <div id="windsBox" class="hidden">
-  <div class="when"><button id="t_minus">−1 h</button><input type="date" id="t_date"><span class="hr" id="t_hour"></span><button id="t_plus">+1 h</button></div>
+  <div class="when"><button id="t_minus">−1 h</button><input type="date" id="t_date"><select class="hr" id="t_hour" title="Heure"><option value="00">00 h</option><option value="01">01 h</option><option value="02">02 h</option><option value="03">03 h</option><option value="04">04 h</option><option value="05">05 h</option><option value="06">06 h</option><option value="07">07 h</option><option value="08">08 h</option><option value="09">09 h</option><option value="10">10 h</option><option value="11">11 h</option><option value="12">12 h</option><option value="13">13 h</option><option value="14">14 h</option><option value="15">15 h</option><option value="16">16 h</option><option value="17">17 h</option><option value="18">18 h</option><option value="19">19 h</option><option value="20">20 h</option><option value="21">21 h</option><option value="22">22 h</option><option value="23">23 h</option></select><button id="t_plus">+1 h</button></div>
   <p class="hint" id="t_info"></p>
   <div class="tw"><table id="windsTable"><thead><tr><th>Niveau</th><th>m sol</th><th>Vient du</th><th>kt</th><th>m/s</th><th>°C</th></tr></thead><tbody></tbody></table></div>
   <div class="grid2"><button id="t_now">Maintenant</button><button id="t_close" class="primary">Fermer</button></div>
@@ -87,7 +88,8 @@
     <h3>Axe imposé par la zone</h3>
     <label class="check"><input type="checkbox" id="z_axisOn"> Axe de largage imposé</label>
     <div id="axisRow">
-      <div class="grid2"><div><label>Cap (° magnétiques)</label><input id="z_axisMag" inputmode="numeric"></div><div></div></div>
+      <div class="grid2"><div><label>Cap (°)</label><input id="z_axisMag" inputmode="numeric"></div><div><label>Référence du cap</label><select id="z_axisRef"><option value="mag">Magnétique</option><option value="true">Vrai</option><option value="grid">Carte (UTM)</option></select></div></div>
+      <p class="hint" id="axisConv"></p>
       <label class="check"><input type="checkbox" id="z_axisBoth"> Dans les deux sens (l'appli prend le plus face au vent)</label>
     </div>
     <p class="hint">Sans axe imposé, le vecteur est face au vent de largage. Appui long sur le cap écrit sur le vecteur pour le changer à la main.</p>
@@ -212,12 +214,12 @@
 
 <div id="toast" class="hidden"></div>
 
-<script src="vendor/leaflet.js?v=0.6.2"></script>
-<script src="vendor/leaflet-rotate.js?v=0.6.2"></script>
-<script src="geo.js?v=0.6.2"></script>
-<script src="clubs.js?v=0.6.2"></script>
-<script src="wmm.js?v=0.6.2"></script>
-<script src="app.js?v=0.6.2"></script>
-<script src="photo.js?v=0.6.2"></script>
+<script src="vendor/leaflet.js?v=0.7.0"></script>
+<script src="vendor/leaflet-rotate.js?v=0.7.0"></script>
+<script src="geo.js?v=0.7.0"></script>
+<script src="clubs.js?v=0.7.0"></script>
+<script src="wmm.js?v=0.7.0"></script>
+<script src="app.js?v=0.7.0"></script>
+<script src="photo.js?v=0.7.0"></script>
 </body>
 </html>

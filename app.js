@@ -4,7 +4,7 @@ window.addEventListener('error', e => {
   const t = document.getElementById('toast');
   if (t) { t.textContent = 'Erreur : ' + (e.message || 'inconnue') + ' — ferme et rouvre l\'appli'; t.classList.remove('hidden'); }
 });
-const VERSION = '0.6.2';
+const VERSION = '0.7.0';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -135,7 +135,7 @@ function upgrade(z) {
   z.params = Object.assign({}, DEFAULT_PARAMS, z.params || {});
   z.show = Object.assign({}, SHOW_DEFAULT, typeof z.show === 'object' && z.show ? z.show : {});
   z.prvs = Array.isArray(z.prvs) ? z.prvs : [];
-  z.axis = Object.assign({ on: false, mag: 0, both: true }, z.axis || {});
+  z.axis = Object.assign({ on: false, mag: 0, both: true, ref: 'mag' }, z.axis || {});
   if (z.elevManual !== null && typeof z.elevManual !== 'number') z.elevManual = null;
   if (z.prvManual === undefined) z.prvManual = null;
   if (z.headingOverride === undefined) z.headingOverride = null; // cap vrai imposé à la main (appui long sur le cap)
@@ -207,13 +207,17 @@ function chooseprv(z, prof) {
   z.prvs.forEach(p => { const v = Geo.toLocal(c, p), s = v.x * f.x + v.y * f.y; if (s > bs) { bs = s; best = p; } });
   return { prv: best, auto: true, lowWind: w };
 }
+// Convergence du quadrillage UTM (angle du nord vrai au nord du quadrillage, + à l'est du méridien central du fuseau)
+function gridConvAt(z) { const c = z.prvs.length ? prvCentroid(z) : z.center, l0 = (Math.floor((c.lng + 180) / 6) + 1) * 6 - 183, r = Math.PI / 180; return Math.atan(Math.tan((c.lng - l0) * r) * Math.sin(c.lat * r)) / r; }
+// Cap imposé de la zone, ramené en vrai selon sa référence (magnétique, vrai ou quadrillage de la carte)
+function axisTrue(z, decl) { const v = +z.axis.mag, ref = z.axis.ref || 'mag'; return n360(ref === 'mag' ? v + decl : ref === 'grid' ? v + gridConvAt(z) : v); }
 function declAt(z) { const c = z.prvs.length ? prvCentroid(z) : z.center; try { return magDeclination(c.lat, c.lng, new Date()); } catch (e) { return 0; } }
 // Cap de l'axe (vrai) : face au vent à la hauteur de largage, ou axe imposé, ou cap choisi à la main ; puis sens inversé si demandé
 function axisHeading(z, prof, hRel, decl) {
   const wr = spdDir(windAt(prof, hRel)), into = wr.dir;
   let h = into, why = 'face au vent de largage', warn = null;
   if (z.axis.on) {
-    const ax = n360(+z.axis.mag + decl);
+    const ax = axisTrue(z, decl);
     if (z.axis.both) { const d1 = diffB(ax, into), d2 = diffB(ax + 180, into); h = Math.abs(d1 - d2) < 0.5 ? ax : (d1 <= d2 ? ax : n360(ax + 180)); }
     else h = ax;
     why = 'axe imposé';
@@ -713,6 +717,9 @@ function fillInputs(only) {
   if (only) return;
   $('z_axisOn').checked = !!current.axis.on; $('z_axisBoth').checked = current.axis.both !== false;
   if (document.activeElement !== $('z_axisMag')) $('z_axisMag').value = current.axis.on ? Math.round(current.axis.mag) : (current.axis.mag || '');
+  $('z_axisRef').value = current.axis.ref || 'mag';
+  { const dc = declAt(current), gc = gridConvAt(current), t = axisTrue(current, dc), s = x => (x >= 0 ? '+' : '−') + fmt1(Math.abs(x));
+    $('axisConv').textContent = current.axis.on || current.axis.mag ? `Soit ${hdg(t - dc)} magnétique = ${hdg(t)} vrai = ${hdg(t - gc)} carte (déclinaison ${s(dc)}°, convergence du quadrillage ${s(gc)}°). Le 📏 donne le cap vrai.` : ''; }
   $('axisRow').classList.toggle('dim', !current.axis.on);
   if (document.activeElement !== $('z_elev')) $('z_elev').value = typeof current.elevManual === 'number' ? current.elevManual : '';
   syncQuick(); syncJump();
@@ -749,6 +756,7 @@ $('j_hOpen').addEventListener('change', e => { const v = numIn(e.target); if (!i
 
 // ---------- Onglet Zones : axe imposé, altitude du terrain, ancien vecteur ----------
 $('z_axisOn').addEventListener('change', e => { current.axis.on = e.target.checked; current.headingOverride = null; current.reversed = false; current.offsetManual = null; persist(); fillInputs(); redraw(); });
+$('z_axisRef').addEventListener('change', e => { current.axis.ref = e.target.value; current.headingOverride = null; current.offsetManual = null; persist(); fillInputs(); redraw(); });
 $('z_axisBoth').addEventListener('change', e => { current.axis.both = e.target.checked; persist(); redraw(); });
 $('z_axisMag').addEventListener('change', e => { const v = numIn(e.target); if (isNaN(v)) return; current.axis.mag = n360(v); current.axis.on = true; current.headingOverride = null; current.offsetManual = null; persist(); fillInputs(); redraw(); });
 $('z_elev').addEventListener('change', e => { const raw = e.target.value.trim(); current.elevManual = raw === '' ? null : numIn(e.target); if (isNaN(current.elevManual)) current.elevManual = null; persist(); fillInputs(); redraw(); });
@@ -776,7 +784,7 @@ $('qVecAuto').addEventListener('click', () => quick(() => { current.offsetManual
 // ---------- Saut : date, heure, hauteurs (sur la carte) ----------
 function syncJump() {
   if (document.activeElement !== $('j_date')) $('j_date').value = current.when.slice(0, 10);
-  $('j_hour').textContent = current.when.slice(11, 13) + ' h';
+  $('j_hour').value = current.when.slice(11, 13);
   $('wxInfo').innerHTML = (current.holdWx ? `<b class="warn">Vecteur gardé du ${fmtWhen(current.when)}</b> · « Maintenant » pour le mettre à jour.<br>` : '') + wxStatus(wxRec, current.when);
 }
 const fmtFetched = ts => { const d = new Date(ts); return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)} à ${pad2(d.getHours())}h${pad2(d.getMinutes())}`; };
@@ -805,12 +813,13 @@ $('j_minus').addEventListener('click', () => setWhen(shiftWhen(current.when, -1)
 $('j_plus').addEventListener('click', () => setWhen(shiftWhen(current.when, 1)));
 $('j_now').addEventListener('click', () => { current.holdWx = false; current.when = nowWhen(); persist(); syncJump(); ensureWx(true); });
 $('j_date').addEventListener('change', e => { if (e.target.value) setWhen(e.target.value + current.when.slice(10)); });
+$('j_hour').addEventListener('change', e => setWhen(current.when.slice(0, 11) + e.target.value + ':00'));
 
 // ---------- Tableau des vents (date et heure indépendantes de la carte) ----------
 let tWhen = null;
 function renderWinds() {
   const date = tWhen.slice(0, 10), rec = wxCached(current.id, date), elev = elevOf(current, rec), pr = wxProfile(rec, tWhen, elev);
-  $('t_date').value = date; $('t_hour').textContent = tWhen.slice(11, 13) + ' h';
+  $('t_date').value = date; $('t_hour').value = tWhen.slice(11, 13);
   $('t_info').innerHTML = wxStatus(rec, tWhen) + (rec ? ` · terrain ${Math.round(elev)} m` : '');
   const tb = $('windsTable').querySelector('tbody'); tb.innerHTML = '';
   if (!pr) { tb.innerHTML = '<tr><td colspan="6" class="mut">Pas de donnée pour cette heure.</td></tr>'; return; }
@@ -834,6 +843,7 @@ $('t_minus').addEventListener('click', () => setTWhen(shiftWhen(tWhen, -1)));
 $('t_plus').addEventListener('click', () => setTWhen(shiftWhen(tWhen, 1)));
 $('t_now').addEventListener('click', () => setTWhen(nowWhen()));
 $('t_date').addEventListener('change', e => { if (e.target.value) setTWhen(e.target.value + tWhen.slice(10)); });
+$('t_hour').addEventListener('change', e => setTWhen(tWhen.slice(0, 11) + e.target.value + ':00'));
 
 // ---------- Placement des PRV : en touchant la carte ----------
 function syncPlaceBtn() { $('btnPlaceP').classList.toggle('on', placing === 'P'); }
