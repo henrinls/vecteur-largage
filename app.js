@@ -4,7 +4,7 @@ window.addEventListener('error', e => {
   const t = document.getElementById('toast');
   if (t) { t.textContent = 'Erreur : ' + (e.message || 'inconnue') + ' — ferme et rouvre l\'appli'; t.classList.remove('hidden'); }
 });
-const VERSION = '0.4.4';
+const VERSION = '0.4.5';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -15,7 +15,7 @@ const TILE_CACHE = 'vl-tiles-v1';
 // Paramètres : les « hypothèses » (valeurs arbitraires, réglables) et les réglages d'utilisation (à chaque saut)
 const DEFAULT_PARAMS = {
   vff: 50, openLoss: 100, perpTime: 15, vz: 4, glide: 2.5, hMin: 300, margin: 20, sep: 300,   // hypothèses (margin : marge de sécurité en % ; sep : séparation mini entre sorties, m)
-  acMs: 41.2,                                                            // vitesse de largage de l'avion (m/s, 80 kt)
+  acMs: 36.0,                                                            // vitesse de largage de l'avion, badin (m/s, 70 kt : Pilatus PC-6)
   hOpen: 1500, relMode: 'FL', relFL: 140, relAGL: 4000                   // utilisation
 };
 const PROFILE_KEYS = ['vff', 'openLoss', 'perpTime', 'vz', 'glide', 'hMin', 'margin', 'sep', 'acMs', 'hOpen', 'relMode', 'relFL', 'relAGL'];
@@ -156,6 +156,7 @@ if (current.target || current.gateA) current = newZone(null);
 // ---------- Paramètres communs à toutes les zones ----------
 let profile = store.get('vl.profile', null) || {};
 PROFILE_KEYS.forEach(k => { if (profile[k] === undefined) profile[k] = DEFAULT_PARAMS[k]; });
+if (profile.acMs === 41.2) profile.acMs = DEFAULT_PARAMS.acMs; // ancien défaut 80 kt → 70 kt (v0.4.5)
 Object.keys(profile).forEach(k => { if (!PROFILE_KEYS.includes(k)) delete profile[k]; });
 store.set('vl.profile', profile);
 function applyProfile(z) { if (z && z.params) PROFILE_KEYS.forEach(k => { z.params[k] = profile[k]; }); }
@@ -238,7 +239,7 @@ function projection(Vair, vff) {
 // restent à « sep » m au moins l'un de l'autre pendant toute la chute (jusqu'à l'ouverture du premier), puis combien en tiennent sur la longueur.
 function exitsOn(sol, prof, p, proj) {
   const vff = +p.vff, Tff = (sol.hRel - sol.h1) / vff, sep = +p.sep || 300, dt = 0.5, u = sol.u;
-  const wr = windAt(prof, sol.hRel), Vg = (+p.acMs) + wr.u * u.x + wr.v * u.y; // vitesse sol de l'avion le long de l'axe
+  const wr = windAt(prof, sol.hRel), Vg = sol.tas + wr.u * u.x + wr.v * u.y; // vitesse sol de l'avion le long de l'axe (vitesse vraie + vent)
   if (!(Vg > 3)) return { n: 1, dt: null, s: null, Vg };
   const F = []; let Dx = 0, Dy = 0;                                               // position d'un para t secondes après sa sortie
   for (let t = 0; t <= Tff + 60; t += dt) {
@@ -271,7 +272,11 @@ function solve(z, prof, rec) {
   const u = { x: Math.sin(H), y: Math.cos(H) }, r = { x: Math.cos(H), y: -Math.sin(H) };
   // 1) chute libre + ouverture (vitesse de chute), 2) 15 s perpendiculaire à l'axe, 3) navigation vers le PRV
   // Chute libre : dérive due au vent + projection (vitesse de l'avion), dans le sens de vol
-  const proj = projection(+p.acMs || 0, +p.vff);
+  // La vitesse saisie est une vitesse badin (indiquée) : on la convertit en vitesse vraie à la hauteur de largage
+  const pRel = 1013.25 * Math.pow(1 - 0.0065 * (out.flRel * 30.48) / 288.15, 5.25588), tRel = tempAt(prof, hRel), TK = (tRel == null ? 15 - 0.0065 * (hRel + elev) : tRel) + 273.15;
+  const rho = pRel * 100 / (287.05 * TK), tas = (+p.acMs || 0) * Math.sqrt(1.225 / rho);
+  out.tas = tas;
+  const proj = projection(tas, +p.vff);
   const dW = driftBetween(prof, hRel, h1, +p.vff), dFF = { x: dW.x + proj.total * u.x, y: dW.y + proj.total * u.y };
   out.throwDist = proj.total; out.dW = dW; out.h1 = h1;
   const dP = driftBetween(prof, h1, h2, +p.vz), lat = Va * (+p.perpTime);
@@ -678,7 +683,7 @@ function updateInfo() {
   $('axisInfo').textContent = t;
   const ex = sol && sol.ok && sol.exits;
   $('whyInfo').innerHTML = sol && sol.ok ? (ex && ex.dt ? `<b>${ex.n} sortie${ex.n > 1 ? 's' : ''}</b> : une toutes les <b>${fmt1(ex.dt)} s</b> (${fmtInt(ex.s)} m au sol, vitesse sol de l'avion ${Math.round(ex.Vg * KT)} kt) pour rester à ${ex.sep} m les uns des autres. ` : '') +
-    `Chute libre : projection ${fmtInt(sol.throwDist)} m + dérive, au total <b>${fmtDist(Math.hypot(sol.dFF.x, sol.dFF.y))}</b> vers le ${hdg(n360(Math.atan2(sol.dFF.x, sol.dFF.y) * 180 / Math.PI))}. ` +
+    `Avion : ${Math.round(sol.tas * KT)} kt de vitesse vraie à FL${Math.round(sol.flRel)} (${Math.round(current.params.acMs * KT)} kt badin). Chute libre : projection ${fmtInt(sol.throwDist)} m + dérive, au total <b>${fmtDist(Math.hypot(sol.dFF.x, sol.dFF.y))}</b> vers le ${hdg(n360(Math.atan2(sol.dFF.x, sol.dFF.y) * 180 / Math.PI))}. ` +
     `Sous voile : vent moyen <b>${Math.round(sol.canopyWind.spd * KT)} kt</b> pour ${Math.round(sol.Va * KT)} kt de vitesse propre` +
     (sol.canopyWind.spd >= sol.Va ? ' <b class="warn">→ tu ne remontes pas au vent : il faut ouvrir au vent du PRV.</b>' : '.') : '';
   $('elevAuto').textContent = typeof current.elevAuto === 'number' ? `automatique : ${current.elevAuto} m` : 'automatique : inconnue (pas encore de prévision)';
@@ -1374,7 +1379,7 @@ async function renderPdfCanvas() {
   tx(`Largage FL${Math.round(sol.flRel)} = ${fmtInt(sol.hRel)} m sol · ouverture ${fmtInt(p.hOpen)} m sol`, col1, l0 + lh * 4.4, C_END, fs, true);
   tx(`PRV ${sol.prvAuto ? 'automatique' : 'choisi à la main'} · ${sol.why}${current.reversed ? ' · sens inversé' : ''}`, col1, l0 + lh * 5.4, '#ffd400', fs);
   [
-    `Vent de largage : ${hdg(sol.windRel.dir)} ${Math.round(sol.windRel.spd * KT)} kt (${fmt1(sol.windRel.spd)} m/s) · avion ${Math.round(p.acMs * KT)} kt`,
+    `Vent de largage : ${hdg(sol.windRel.dir)} ${Math.round(sol.windRel.spd * KT)} kt (${fmt1(sol.windRel.spd)} m/s) · avion ${Math.round(p.acMs * KT)} kt badin (${Math.round(sol.tas * KT)} kt vraie)`,
     `Chute ${p.vff} m/s · perte à l'ouverture ${p.openLoss} m`,
     `${p.perpTime} s perpendiculaire · Vz ${fmt1(+p.vz)} m/s · finesse ${fmt1(+p.glide)}`,
     `Arrivée au PRV à ${p.hMin} m minimum · marge de sécurité ${sol.margin} % · terrain ${Math.round(sol.elev)} m`,
