@@ -12,19 +12,19 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>vecteur-largage</title>
 <link rel="stylesheet" href="vendor/leaflet.css">
-<link rel="stylesheet" href="style.css?v=0.1.0">
+<link rel="stylesheet" href="style.css?v=0.2.0">
 </head>
 <body>
 <div id="map"></div>
 
 <header id="top">
   <div class="leftcol">
-    <button id="btnManeuver" class="pill" title="Manœuvre">⚙ Manœuvre</button>
+    <button id="btnParams" class="pill" title="Paramètres">⚙ Paramètres</button>
     <button id="btnZones" class="pill" title="Zones">☰ <span id="zoneName">Nouvelle zone</span></button>
   </div>
   <div class="spacer"></div>
   <button id="btnNorth" class="round" title="Nord en haut"><span id="compassNeedle">▲<small>N</small></span></button>
-  <button id="btnAxisUp" class="round" title="Axe de finale vers le haut"><span class="axisIco">↑<small>AXE</small></span></button>
+  <button id="btnAxisUp" class="round" title="Axe de largage vers le haut"><span class="axisIco">↑<small>AXE</small></span></button>
   <button id="btnFit" class="round" title="Voir toute la figure">⤢</button>
   <button id="btnLocate" class="round" title="Ma position">⌖</button>
 </header>
@@ -32,23 +32,33 @@
 <div id="banner" class="hidden"></div>
 
 <nav id="quick">
-  <button id="qWind" title="Vent du jour : direction et force"></button>
-  <button id="qSide" title="Prépo à gauche ou à droite"></button>
-  <button id="qPrepo" title="Afficher / masquer la prépo">Prépo</button>
-  <button id="qPath" title="Afficher / masquer le chemin des prépos de 0 au vent max">0→7</button>
-  <button id="qSector" title="Afficher / masquer le secteur de finale">Secteur</button>
-  <button id="qReperes" title="Afficher / masquer les repères">Repères</button>
+  <button id="qWhen" title="Date et heure du saut"></button>
+  <button id="qRel" title="Hauteur de largage et d'ouverture"></button>
+  <button id="qWinds" title="Tableau des vents">🌬</button>
+  <button id="qRelax" title="Afficher / masquer la zone de relaxation">Relax</button>
+  <button id="qRev" title="Inverser le sens de l'axe">⇅ Sens</button>
+  <button id="qPrv" title="PRV automatique ou choisi à la main">PRV auto</button>
+  <button id="qVecAuto" class="hidden" title="Replacer le vecteur au mieux">Vect. auto</button>
   <button id="qMeasure" title="Mesurer cap et distance entre deux points">📏</button>
-  <button id="qTicks" title="Graduations en degrés autour de la cible">0°</button>
 </nav>
 
-<div id="windBox" class="hidden">
-  <div class="wrow"><label>Vent : d'où il vient (°)</label>
-    <div class="stepper"><button data-wdir="-10">−10</button><button data-wdir="-5">−5</button><input id="w_dir" inputmode="decimal"><button data-wdir="5">+5</button><button data-wdir="10">+10</button></div></div>
-  <div class="wrow"><label>Force (m/s)</label>
-    <div class="stepper"><button data-wspd="-1">−1</button><button data-wspd="-0.5">−½</button><input id="w_spd" inputmode="decimal"><button data-wspd="0.5">+½</button><button data-wspd="1">+1</button></div></div>
-  <p class="hint" id="windInfo"></p>
-  <button id="windOk" class="wide primary">OK</button>
+<div id="jumpBox" class="hidden">
+  <div class="when"><button id="j_minus">−1 h</button><input type="date" id="j_date"><span class="hr" id="j_hour"></span><button id="j_plus">+1 h</button></div>
+  <div class="row"><button id="j_now" class="wide">🔄 Maintenant (mettre à jour la prévision)</button></div>
+  <div class="jrow">
+    <div><label>Largage (FL)</label><input id="j_relFL" inputmode="numeric"></div>
+    <div><label>= m sol</label><input id="j_relAGL" inputmode="numeric"></div>
+    <div><label>Ouverture (m sol)</label><input id="j_hOpen" inputmode="numeric"></div>
+  </div>
+  <p class="hint" id="wxInfo"></p>
+  <button id="jumpOk" class="wide primary">OK</button>
+</div>
+
+<div id="windsBox" class="hidden">
+  <div class="when"><button id="t_minus">−1 h</button><input type="date" id="t_date"><span class="hr" id="t_hour"></span><button id="t_plus">+1 h</button></div>
+  <p class="hint" id="t_info"></p>
+  <div class="tw"><table id="windsTable"><thead><tr><th>Niveau</th><th>m sol</th><th>Vient du</th><th>kt</th><th>m/s</th><th>°C</th></tr></thead><tbody></tbody></table></div>
+  <div class="grid2"><button id="t_now">Maintenant</button><button id="t_close" class="primary">Fermer</button></div>
 </div>
 
 <div id="measureBox" class="hidden"></div>
@@ -56,29 +66,41 @@
 <section id="sheet" class="hidden">
   <div class="grab" id="grab"><span></span></div>
   <div class="tabs">
-    <button data-tab="pilote">Manœuvre</button>
-    <button data-tab="reglages" class="on">Zones</button>
+    <button data-tab="params">Paramètres</button>
+    <button data-tab="zones" class="on">Zones</button>
     <button id="btnClose" class="close">✕</button>
   </div>
 
-  <div id="tab-reglages" class="tab hidden">
+  <div id="tab-zones" class="tab hidden">
     <div class="row"><button id="btnNewZone" class="wide">＋ Nouvelle zone</button></div>
     <h3>Mes zones</h3>
     <p class="hint">Touche un nom pour ouvrir la zone (tout s'enregistre au fur et à mesure). Tiens ≡ et glisse pour changer l'ordre.</p>
     <ul id="zoneList"></ul>
 
-    <h3>Cible</h3>
+    <h3>Points de rendez-vous (PRV)</h3>
     <div class="row grid2">
-      <button id="btnPlaceT" class="wide">📍 Toucher la carte</button>
-      <button id="btnGpsT" class="wide">📡 Cible ici (GPS)</button>
+      <button id="btnPlaceP" class="wide">📍 Toucher la carte</button>
+      <button id="btnGpsP" class="wide">📡 PRV ici (GPS)</button>
     </div>
-    <h3>Repères</h3>
-    <div class="row grid2">
-      <button id="btnPlaceR" class="wide">＋ Toucher la carte</button>
-      <button id="btnGpsR" class="wide">📡 Repère ici (GPS)</button>
+    <p class="hint">1, 2 ou 4 PRV. Par défaut l'appli prend le plus au vent (vent moyen 0–300 m). Appui long sur un PRV : l'utiliser comme référence ou le supprimer ; « PRV auto » (à gauche de la carte) pour revenir au choix automatique.</p>
+
+    <h3>Axe imposé par la zone</h3>
+    <label class="check"><input type="checkbox" id="z_axisOn"> Axe de largage imposé</label>
+    <div id="axisRow">
+      <div class="grid2"><div><label>Cap (° magnétiques)</label><input id="z_axisMag" inputmode="numeric"></div><div></div></div>
+      <label class="check"><input type="checkbox" id="z_axisBoth"> Dans les deux sens (l'appli prend le plus face au vent)</label>
     </div>
-    <p class="hint">« GPS » : tiens-toi sur le point, l'appli prend ta position exacte. Appui long sur la cible ou un repère pour le déplacer ; appui court sur un repère pour le nommer ou le supprimer.</p>
+    <p class="hint">Sans axe imposé, le vecteur est face au vent de largage. Appui long sur le cap écrit sur le vecteur pour le changer à la main.</p>
     <p class="hint" id="axisInfo"></p>
+
+    <h3>Altitude du terrain</h3>
+    <div class="grid2"><div><label>Corrigée (m), vide = auto</label><input id="z_elev" inputmode="numeric"></div><div><p class="hint" id="elevAuto"></p></div></div>
+
+    <div id="prevBox" class="hidden">
+      <h3>Ancien vecteur</h3>
+      <p class="hint" id="prevInfo"></p>
+      <div class="row grid2"><button id="prevToggle" class="wide">👁 Afficher / masquer</button><button id="prevDel" class="wide danger">🗑 Supprimer</button></div>
+    </div>
 
     <h3>Fond de carte</h3>
     <div class="row seg">
@@ -100,7 +122,7 @@
 
     <h3>Export</h3>
     <div class="row"><button id="btnPdf" class="wide primary">📄 PDF A4</button></div>
-    <p class="hint">Axe de finale vers le haut, nord dans un coin, portrait ou paysage selon la figure, tel qu'affiché.</p>
+    <p class="hint">Page 1 : carte, vecteur vers le haut, PRV et zone de relaxation. Page 2 : tableau des vents à l'heure du saut.</p>
 
     <h3>Sauvegarde</h3>
     <div class="row grid2">
@@ -109,38 +131,35 @@
     </div>
     <input type="file" id="importFile" accept=".json,application/json" class="hidden">
     <div class="row"><button id="btnWipe" class="wide danger">🗑 Effacer toutes les données</button></div>
-    <p class="hint">Exporter crée un fichier avec toutes tes zones et ta manœuvre (à garder dans Fichiers, envoyer par AirDrop ou mail…). Importer ajoute les zones d'un tel fichier à celles déjà enregistrées, sans rien effacer. Version <span id="ver"></span></p>  
+    <p class="hint">Exporter crée un fichier avec toutes tes zones et tes paramètres (à garder dans Fichiers, envoyer par AirDrop ou mail…). Importer ajoute les zones d'un tel fichier à celles déjà enregistrées, sans rien effacer. Version <span id="ver"></span></p>
   </div>
 
-  <div id="tab-pilote" class="tab hidden">
-    <p class="hint">Ta manœuvre : ces réglages sont communs à <b>toutes</b> tes zones. Le vent du jour (direction, force) se règle sur la carte avec 🌬.</p>
-    <h3>Secteur de finale</h3>
+  <div id="tab-params" class="tab hidden">
+    <p class="hint">Communs à <b>toutes</b> tes zones. Date et heure du saut : bouton 🕑 sur la carte.</p>
+    <h3>Réglages du saut</h3>
     <div class="grid2">
-      <div><label>Ouverture totale (°)</label><input id="p_sector" inputmode="decimal"></div>
-      <div><label>Vent max de compétition (m/s)</label><input id="p_vmax" inputmode="decimal"></div>
+      <div><label>Largage (FL)</label><input id="p_relFL" inputmode="numeric"></div>
+      <div><label>Largage (m sol)</label><input id="p_relAGL" inputmode="numeric"></div>
+      <div><label>Ouverture (m sol)</label><input id="p_hOpen" inputmode="numeric"></div>
     </div>
-    <p class="hint">Le secteur part de la cible, centré sur l'axe du vent, côté d'où tu arrives ; il s'arrête à la prépo affichée.</p>
+    <p class="hint">FL et m sol sont liés : la valeur saisie en dernier est gardée, l'autre est recalculée avec la pression prévue.</p>
 
-    <h3>Prépo par vent nul</h3>
+    <h3>Hypothèses de calcul</h3>
+    <p class="hint">Valeurs arbitraires, à ajuster selon ton expérience.</p>
+    <h4>Chute et ouverture</h4>
     <div class="grid2">
-      <div><label>Profondeur (m)</label><input id="p_d0" inputmode="decimal"></div>
-      <div><label>Déport latéral (m)</label><input id="p_s0" inputmode="decimal"></div>
-      <div><label>Hauteur (m)</label><input id="p_h0" inputmode="decimal"></div>
+      <div><label>Vitesse de chute (m/s)</label><input id="p_vff" inputmode="decimal"></div>
+      <div><label>Perte à l'ouverture (m)</label><input id="p_openLoss" inputmode="decimal"></div>
     </div>
-
-    <h3>Prépo au vent max</h3>
+    <h4>Sous voile</h4>
     <div class="grid2">
-      <div><label>Profondeur (m)</label><input id="p_dM" inputmode="decimal"></div>
-      <div><label>Déport latéral (m)</label><input id="p_sM" inputmode="decimal"></div>
-      <div><label>Hauteur (m)</label><input id="p_hM" inputmode="decimal"></div>
+      <div><label>Durée perpendiculaire à l'axe (s)</label><input id="p_perpTime" inputmode="decimal"></div>
+      <div><label>Vitesse verticale (m/s)</label><input id="p_vz" inputmode="decimal"></div>
+      <div><label>Finesse</label><input id="p_glide" inputmode="decimal"></div>
+      <div><label>Arrivée au PRV au minimum (m sol)</label><input id="p_hMin" inputmode="decimal"></div>
     </div>
-    <p class="hint">Profondeur : distance depuis la cible le long de l'axe du vent. Déport : sur le côté, à droite ou à gauche face à la cible (bouton Prépo D / G). Entre vent nul et vent max, l'appli calcule en ligne droite.</p>
-
-    <h3>Zone de prépo</h3>
-    <div class="grid2">
-      <div><label>Fraction du secteur (0 = point)</label><input id="p_zoneFrac" inputmode="decimal"></div>
-    </div>
-    <p class="hint">0 : la prépo est un point. Sinon (ex. 0,67) : cercle dont le diamètre est la largeur du secteur à cette fraction de sa longueur, depuis la cible.</p>
+    <p class="hint" id="vhInfo"></p>
+    <p class="hint">Après l'ouverture : vol perpendiculaire à l'axe, du meilleur côté, puis route directe vers le PRV (dérive corrigée en crabe). Le vecteur est le plus long segment de l'axe d'où chacun peut rejoindre le PRV à la hauteur minimum.</p>
   </div>
 
 </section>
@@ -179,10 +198,11 @@
 
 <div id="toast" class="hidden"></div>
 
-<script src="vendor/leaflet.js?v=0.1.0"></script>
-<script src="vendor/leaflet-rotate.js?v=0.1.0"></script>
-<script src="geo.js?v=0.1.0"></script>
-<script src="app.js?v=0.1.0"></script>
-<script src="photo.js?v=0.1.0"></script>
+<script src="vendor/leaflet.js?v=0.2.0"></script>
+<script src="vendor/leaflet-rotate.js?v=0.2.0"></script>
+<script src="geo.js?v=0.2.0"></script>
+<script src="wmm.js?v=0.2.0"></script>
+<script src="app.js?v=0.2.0"></script>
+<script src="photo.js?v=0.2.0"></script>
 </body>
 </html>

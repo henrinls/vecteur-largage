@@ -4,7 +4,7 @@ window.addEventListener('error', e => {
   const t = document.getElementById('toast');
   if (t) { t.textContent = 'Erreur : ' + (e.message || 'inconnue') + ' — ferme et rouvre l\'appli'; t.classList.remove('hidden'); }
 });
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -12,46 +12,149 @@ const BASEMAPS = {
   ign: { url: 'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}', attr: 'Photos aériennes © IGN – Géoplateforme', maxNative: 19 }
 };
 const TILE_CACHE = 'vl-tiles-v1';
-// Réglages de la manœuvre (communs à toutes les zones) : secteur de finale, vent max, prépo par vent nul et au vent max
+// Paramètres : les « hypothèses » (valeurs arbitraires, réglables) et les réglages d'utilisation (à chaque saut)
 const DEFAULT_PARAMS = {
-  sector: 30, vmax: 7,
-  d0: 250, s0: 80, h0: 300,     // prépo par vent nul : profondeur, déport latéral, hauteur (m)
-  dM: 80, sM: 30, hM: 150,      // prépo au vent max
-  zoneFrac: 0,                  // zone de prépo : 0 = simple point ; sinon diamètre = largeur du secteur à cette fraction
-  ticks: true
+  vff: 50, openLoss: 100, perpTime: 15, vz: 4, glide: 2.5, hMin: 300,   // hypothèses
+  hOpen: 1500, relMode: 'FL', relFL: 140, relAGL: 4000                   // utilisation
 };
-const PROFILE_KEYS = ['sector', 'vmax', 'd0', 's0', 'h0', 'dM', 'sM', 'hM', 'zoneFrac'];
-const C_TARGET = '#ff2020', C_SECTOR = '#ff8c00', C_PREPO = '#ff2020', C_PATH = '#ffd400', C_REP = '#ffffff';
+const PROFILE_KEYS = ['vff', 'openLoss', 'perpTime', 'vz', 'glide', 'hMin', 'hOpen', 'relMode', 'relFL', 'relAGL'];
+const C_START = '#1ec83c', C_END = '#ff2020', C_PRV = '#2f80ff', C_PRVUSED = '#ffd400', C_RELAX = '#00e5ff';
 const isDark = c => c === '#000000';
+const KT = 1.943844; // m/s → nœuds
 
-// ---------- Stockage (clés pa.* : séparées de Setup PSV, même site) ----------
+
+// ---------- Météo en ligne (Open-Meteo, gratuit, sans compte) ----------
+// Météo-France (AROME 2,5 km en France puis ARPEGE) jusqu'à J+3 ; au-delà, ECMWF (modèle mondial).
+const PLEV = [1000, 950, 925, 900, 850, 800, 750, 700, 650, 600, 550, 500, 450, 400, 350, 300, 275, 250];
+const HLEV_MF = [10, 20, 50, 100, 150, 200], HLEV_EC = [10, 100];
+const pad2 = n => String(n).padStart(2, '0');
+const dayStr = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+function nowWhen() { const d = new Date(); return `${dayStr(d)}T${pad2(d.getHours())}:00`; }
+function shiftWhen(w, hours) { const d = new Date(w + ':00'); d.setHours(d.getHours() + hours); return `${dayStr(d)}T${pad2(d.getHours())}:00`; }
+function fmtWhen(w) { const d = new Date(w + ':00'); return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)} ${pad2(d.getHours())}h`; }
+function wxSource(date) {
+  const days = Math.round((new Date(date + 'T12:00') - new Date(dayStr(new Date()) + 'T12:00')) / 864e5);
+  if (days <= 3) return { kind: 'mf', name: 'Météo-France (AROME, puis ARPEGE)', base: 'https://api.open-meteo.com/v1/meteofrance', models: 'meteofrance_seamless', hlev: HLEV_MF };
+  return { kind: 'ec', name: 'ECMWF IFS (mondial)', base: 'https://api.open-meteo.com/v1/forecast', models: 'ecmwf_ifs025', hlev: HLEV_EC };
+}
+function wxUrl(lat, lng, date, src, minimal) {
+  const v = [];
+  (minimal ? [10] : src.hlev).forEach(h => v.push(`wind_speed_${h}m`, `wind_direction_${h}m`));
+  v.push('temperature_2m'); if (!minimal && src.kind === 'mf') [20, 50, 100, 150, 200].forEach(h => v.push(`temperature_${h}m`));
+  PLEV.forEach(p => v.push(`wind_speed_${p}hPa`, `wind_direction_${p}hPa`, `temperature_${p}hPa`, `geopotential_height_${p}hPa`));
+  return `${src.base}?latitude=${lat.toFixed(4)}&longitude=${lng.toFixed(4)}&hourly=${v.join(',')}&models=${src.models}` +
+    `&wind_speed_unit=ms&timezone=auto&start_date=${date}&end_date=${date}`;
+}
+const wxKey = (zid, date) => `vl.wx.${zid || 'tmp'}.${date}`;
+const wxMem = {};
+function wxCached(zid, date) { const k = wxKey(zid, date); return wxMem[k] || (wxMem[k] = store.get(k, null)); }
+async function wxFetch(z, date) {
+  const src = wxSource(date), c = z.center && z.prvs.length ? prvCentroid(z) : z.center;
+  let r = null, js = null, used = src;
+  // Essais : modèle prévu, puis requête allégée, puis ECMWF (secours mondial)
+  const ec = wxSource('9999-12-31'), tries = [[src, false], [src, true]].concat(src.kind === 'mf' ? [[ec, false]] : []);
+  for (const [s2, minimal] of tries) {
+    try { r = await fetch(wxUrl(c.lat, c.lng, date, s2, minimal)); if (r.ok) { js = await r.json(); used = s2; break; } } catch (e) { r = null; if (navigator.onLine === false) break; }
+  }
+  if (!js || !js.hourly) throw new Error(r ? 'HTTP ' + r.status : 'réseau');
+  const rec = { date, fetched: Date.now(), model: used.name, elev: js.elevation, hourly: js.hourly };
+  const k = wxKey(z.id, date); wxMem[k] = rec; store.set(k, rec);
+  // ménage : on ne garde que les 4 derniers jours téléchargés de chaque zone
+  try { Object.keys(localStorage).filter(x => x.startsWith(`vl.wx.${z.id || 'tmp'}.`)).sort().slice(0, -4).forEach(x => store.del(x)); } catch (e) {}
+  if (typeof js.elevation === 'number') { z.elevAuto = Math.round(js.elevation); }
+  return rec;
+}
+// Profil de vent à une heure donnée : niveaux en hauteur sol (m AGL), vent (u, v vers où il souffle), température
+function wxProfile(rec, when, elevUsed) {
+  if (!rec) return null;
+  const H = rec.hourly, i = (H.time || []).indexOf(when);
+  if (i < 0) return null;
+  const val = k => (H[k] && typeof H[k][i] === 'number') ? H[k][i] : null;
+  const lv = [];
+  const add = (h, spd, dir, T, extra) => { if (spd == null || dir == null) return; const a = dir * Math.PI / 180; lv.push(Object.assign({ h, spd, dir, T, u: -spd * Math.sin(a), v: -spd * Math.cos(a) }, extra || {})); };
+  const hl = Object.keys(H).filter(k => /^wind_speed_\d+m$/.test(k)).map(k => +k.match(/\d+/)[0]).sort((a, b) => a - b);
+  hl.forEach(h => add(h, val(`wind_speed_${h}m`), val(`wind_direction_${h}m`), val(h === 10 ? 'temperature_2m' : `temperature_${h}m`)));
+  const topH = lv.length ? lv[lv.length - 1].h : 0;
+  const pz = [];
+  PLEV.forEach(p => {
+    const z = val(`geopotential_height_${p}hPa`); if (z == null) return;
+    pz.push({ p, z });
+    const h = z - elevUsed;
+    if (h > topH + 30) add(h, val(`wind_speed_${p}hPa`), val(`wind_direction_${p}hPa`), val(`temperature_${p}hPa`), { p });
+  });
+  lv.sort((a, b) => a.h - b.h); pz.sort((a, b) => b.p - a.p);
+  return lv.length ? { lv, pz, elev: elevUsed, model: rec.model, fetched: rec.fetched } : null;
+}
+function interpLv(prof, h, key) {
+  const L = prof.lv; if (h <= L[0].h) return L[0][key]; if (h >= L[L.length - 1].h) return L[L.length - 1][key];
+  for (let k = 1; k < L.length; k++) if (h <= L[k].h) { const a = L[k - 1], b = L[k], f = (h - a.h) / (b.h - a.h); return a[key] == null || b[key] == null ? (a[key] ?? b[key]) : a[key] + (b[key] - a[key]) * f; }
+  return null;
+}
+const windAt = (prof, h) => ({ u: interpLv(prof, h, 'u'), v: interpLv(prof, h, 'v') });
+const tempAt = (prof, h) => interpLv(prof, h, 'T');
+const spdDir = w => ({ spd: Math.hypot(w.u, w.v), dir: n360(Math.atan2(-w.u, -w.v) * 180 / Math.PI) });
+
+// ---------- FL ↔ hauteur sol (m AGL) ----------
+// FL = altitude pression (centaines de pieds au-dessus de l'isobare 1013,25 hPa, atmosphère standard)
+const stdP = hm => 1013.25 * Math.pow(1 - 0.0065 * hm / 288.15, 5.25588);              // altitude standard (m) → pression
+const stdH = p => (1 - Math.pow(p / 1013.25, 1 / 5.25588)) * 288.15 / 0.0065;           // pression → altitude standard (m)
+function zOfP(pz, p) { // hauteur géopotentielle (m) d'une pression, interpolée en log p
+  if (!pz || pz.length < 2) return null;
+  const lp = Math.log(p); let a = pz[0], b = pz[1];
+  for (let k = 1; k < pz.length; k++) { b = pz[k]; a = pz[k - 1]; if (p >= b.p) break; }
+  return a.z + (b.z - a.z) * (lp - Math.log(a.p)) / (Math.log(b.p) - Math.log(a.p));
+}
+function pOfZ(pz, z) {
+  if (!pz || pz.length < 2) return null;
+  let a = pz[0], b = pz[1];
+  for (let k = 1; k < pz.length; k++) { b = pz[k]; a = pz[k - 1]; if (z <= b.z) break; }
+  const lp = Math.log(a.p) + (Math.log(b.p) - Math.log(a.p)) * (z - a.z) / (b.z - a.z);
+  return Math.exp(lp);
+}
+function flToAgl(fl, prof, elev) {
+  const hs = fl * 100 * 0.3048;
+  const z = prof ? zOfP(prof.pz, stdP(hs)) : null;
+  return (z == null ? hs : z) - elev; // sans prévision : atmosphère standard
+}
+function aglToFl(agl, prof, elev) {
+  const p = prof ? pOfZ(prof.pz, agl + elev) : null;
+  return (p == null ? agl + elev : stdH(p)) / 30.48;
+}
+
+// ---------- Stockage (clés vl.* : séparées des autres applis, même site) ----------
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
-  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { toast('Enregistrement impossible sur cet appareil'); } }
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { toast('Enregistrement impossible sur cet appareil'); } },
+  del(k) { try { localStorage.removeItem(k); } catch (e) {} }
 };
 const clone = o => JSON.parse(JSON.stringify(o));
-const SHOW_DEFAULT = { sector: true, prepo: true, path: true, reperes: true };
+const SHOW_DEFAULT = { relax: true };
 function upgrade(z) {
   if (!z) return z;
   z.params = Object.assign({}, DEFAULT_PARAMS, z.params || {});
-  z.show = Object.assign({}, SHOW_DEFAULT, typeof z.show === 'object' ? z.show : {});
-  z.reperes = Array.isArray(z.reperes) ? z.reperes : [];
-  z.side = z.side === 'G' ? 'G' : 'D';
-  if (typeof z.windDir !== 'number') z.windDir = null;
-  if (typeof z.windSpeed !== 'number') z.windSpeed = 0;
+  z.show = Object.assign({}, SHOW_DEFAULT, typeof z.show === 'object' && z.show ? z.show : {});
+  z.prvs = Array.isArray(z.prvs) ? z.prvs : [];
+  z.axis = Object.assign({ on: false, mag: 0, both: true }, z.axis || {});
+  if (z.elevManual !== null && typeof z.elevManual !== 'number') z.elevManual = null;
+  if (z.prvManual === undefined) z.prvManual = null;
+  if (z.headingOverride === undefined) z.headingOverride = null; // cap vrai imposé à la main (appui long sur le cap)
+  z.reversed = !!z.reversed;
+  if (z.offsetManual === undefined) z.offsetManual = null;          // vecteur déplacé à la main (décalage latéral, m)
+  if (z.tManual === undefined) z.tManual = null;
+  if (typeof z.when !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:00$/.test(z.when)) z.when = nowWhen(); // date et heure du saut
   return z;
 }
 let zones = store.get('vl.zones', []).map(upgrade);
 let current = upgrade(store.get('vl.current', null)) || newZone(null);
-// La copie de base (v0.1) pouvait contenir des zones PSV vides : on ne garde que les zones PA
-zones = zones.filter(z => !z.gateA || z.target);
+// La copie de base (v0.1) pouvait contenir des zones d'une autre appli : on ne garde que les zones de largage
+zones = zones.filter(z => !z.target && !z.gateA);
 store.set('vl.zones', zones);
-if (current.gateA && !current.target) current = newZone(null);
+if (current.target || current.gateA) current = newZone(null);
 
-// ---------- Manœuvre : réglages communs à toutes les zones ----------
+// ---------- Paramètres communs à toutes les zones ----------
 let profile = store.get('vl.profile', null) || {};
 PROFILE_KEYS.forEach(k => { if (profile[k] === undefined) profile[k] = DEFAULT_PARAMS[k]; });
-Object.keys(profile).forEach(k => { if (!PROFILE_KEYS.includes(k)) delete profile[k]; }); // restes de la copie PSV
+Object.keys(profile).forEach(k => { if (!PROFILE_KEYS.includes(k)) delete profile[k]; });
 store.set('vl.profile', profile);
 function applyProfile(z) { if (z && z.params) PROFILE_KEYS.forEach(k => { z.params[k] = profile[k]; }); }
 applyProfile(current); zones.forEach(applyProfile); store.set('vl.zones', zones);
@@ -59,8 +162,8 @@ applyProfile(current); zones.forEach(applyProfile); store.set('vl.zones', zones)
 function newZone(center) {
   return upgrade({
     id: null, name: 'Nouvelle zone',
-    center: center || { lat: 46.6, lng: 2.4 }, zoom: center ? 17 : 6,
-    target: null, windDir: null, windSpeed: 0, side: 'D', reperes: [],
+    center: center || { lat: 46.6, lng: 2.4 }, zoom: center ? 15 : 6,
+    prvs: [], axis: { on: false, mag: 0, both: true }, elevManual: null,
     params: Object.assign({}, DEFAULT_PARAMS)
   });
 }
@@ -73,59 +176,135 @@ function persist() {
   }
 }
 
-const hdg = h => String(Math.round(((h % 360) + 360) % 360)).padStart(3, '0') + '°';
-function cardOf(h) { h = ((h % 360) + 360) % 360; if (h >= 315 || h <= 45) return 'N'; if (h >= 135 && h <= 225) return 'S'; return h < 180 ? 'E' : 'O'; }
+const n360 = h => ((h % 360) + 360) % 360;
+const hdg = h => String(Math.round(n360(h)) % 360).padStart(3, '0') + '°';
+function cardOf(h) { h = n360(h); if (h >= 315 || h <= 45) return 'N'; if (h >= 135 && h <= 225) return 'S'; return h < 180 ? 'E' : 'O'; }
 const fmt1 = v => (Math.round(v * 10) / 10).toString().replace('.', ',');
+const fmtInt = v => Math.round(v).toLocaleString('fr-FR');
 
-// ---------- Figure (calcul pur, réutilisé par la carte et le PDF) ----------
-// Repère local centré sur la cible (x = Est, y = Nord, en m).
-// Le vent vient de windDir : on pose face au vent (cap de finale = windDir), en arrivant du côté sous le vent.
-function hasTarget() { return !!current.target; }
-function hasWind() { return typeof current.windDir === 'number'; }
-function finalHeading() { return hasWind() ? ((current.windDir % 360) + 360) % 360 : 0; }
-function prepoAt(v) { // prépo pour un vent de v m/s, interpolée en ligne droite entre vent nul et vent max
-  const p = current.params, vm = Math.max(0.1, +p.vmax || 7), k = Math.min(1, Math.max(0, (+v || 0) / vm));
-  const lerp = (a, b) => (+a || 0) + ((+b || 0) - (+a || 0)) * k;
-  const d = lerp(p.d0, p.dM), s = lerp(p.s0, p.sM), h = lerp(p.h0, p.hM);
-  const W = finalHeading() * Math.PI / 180;
-  const down = { x: -Math.sin(W), y: -Math.cos(W) };      // vers l'aval du vent (d'où l'on arrive en finale)
-  const right = { x: Math.cos(W), y: -Math.sin(W) };      // droite du parachutiste face à la cible, face au vent
-  const sg = current.side === 'G' ? -1 : 1;
-  const v2 = { x: d * down.x + sg * s * right.x, y: d * down.y + sg * s * right.y };
-  return { v: v2, ll: Geo.fromLocal(current.target, v2), d, s, h, dist: Math.hypot(v2.x, v2.y) };
+// ---------- Calcul du vecteur de largage ----------
+// Repère local centré sur le PRV utilisé (x = Est, y = Nord, en m). Le vent (u, v) est le sens où il souffle.
+const DH = 10; // pas d'intégration en hauteur (m)
+function prvCentroid(z) { const P = z.prvs; return { lat: P.reduce((a, p) => a + p.lat, 0) / P.length, lng: P.reduce((a, p) => a + p.lng, 0) / P.length }; }
+function elevOf(z, rec) { return typeof z.elevManual === 'number' ? z.elevManual : (rec && typeof rec.elev === 'number' ? rec.elev : (typeof z.elevAuto === 'number' ? z.elevAuto : 0)); }
+function driftBetween(prof, hTop, hBot, vsink) { // déplacement dû au vent en descendant de hTop à hBot à vsink m/s
+  let x = 0, y = 0;
+  for (let h = hTop; h > hBot; h -= DH) { const dh = Math.min(DH, h - hBot), w = windAt(prof, h - dh / 2); x += w.u * dh / vsink; y += w.v * dh / vsink; }
+  return { x, y };
 }
-function figure() {
-  if (!hasTarget() || !hasWind()) return null;
-  const p = current.params, half = Math.max(1, +p.sector || 30) / 2;
-  const cur = prepoAt(current.windSpeed);
-  const R = Math.max(20, cur.dist);
-  const W = finalHeading(), back = W + 180;
-  const arc = [];
-  for (let a = -half; a <= half + 0.01; a += half / 8) {
-    const r = (back + a) * Math.PI / 180;
-    arc.push(Geo.fromLocal(current.target, { x: R * Math.sin(r), y: R * Math.cos(r) }));
+function meanWindLow(prof, top) { let u = 0, v = 0, n = 0; for (let h = 0; h <= top; h += DH) { const w = windAt(prof, h); u += w.u; v += w.v; n++; } return { u: u / n, v: v / n }; }
+function relHeight(p, prof, elev) { return p.relMode === 'AGL' ? +p.relAGL : flToAgl(+p.relFL, prof, elev); }
+// PRV utilisé : choix à la main, sinon le plus au vent (vent moyen 0–300 m)
+function chooseprv(z, prof) {
+  if (!z.prvs.length) return null;
+  if (z.prvManual && z.prvs.find(p => p.id === z.prvManual)) return { prv: z.prvs.find(p => p.id === z.prvManual), auto: false };
+  if (z.prvs.length === 1 || !prof) return { prv: z.prvs[0], auto: true };
+  const w = spdDir(meanWindLow(prof, 300)), a = w.dir * Math.PI / 180, f = { x: Math.sin(a), y: Math.cos(a) }, c = prvCentroid(z);
+  let best = null, bs = -Infinity;
+  z.prvs.forEach(p => { const v = Geo.toLocal(c, p), s = v.x * f.x + v.y * f.y; if (s > bs) { bs = s; best = p; } });
+  return { prv: best, auto: true, lowWind: w };
+}
+function declAt(z) { const c = z.prvs.length ? prvCentroid(z) : z.center; try { return magDeclination(c.lat, c.lng, new Date()); } catch (e) { return 0; } }
+// Cap de l'axe (vrai) : face au vent à la hauteur de largage, ou axe imposé, ou cap choisi à la main ; puis sens inversé si demandé
+function axisHeading(z, prof, hRel, decl) {
+  const wr = spdDir(windAt(prof, hRel)), into = wr.dir;
+  let h = into, why = 'face au vent de largage', warn = null;
+  if (z.axis.on) {
+    const ax = n360(+z.axis.mag + decl);
+    if (z.axis.both) { const d1 = diffB(ax, into), d2 = diffB(ax + 180, into); h = Math.abs(d1 - d2) < 0.5 ? ax : (d1 <= d2 ? ax : n360(ax + 180)); }
+    else h = ax;
+    why = 'axe imposé';
   }
-  const vm = Math.max(1, Math.round(+p.vmax || 7));
-  const path = []; for (let v = 0; v <= vm; v++) path.push(Object.assign({ wind: v }, prepoAt(v)));
-  const zoneR = (+p.zoneFrac || 0) > 0 ? (+p.zoneFrac) * R * Math.tan(half * Math.PI / 180) : 0;
-  return { cur, R, arc, half, path, zoneR, W };
+  if (typeof z.headingOverride === 'number') { h = z.headingOverride; why = 'cap choisi à la main'; }
+  if (z.reversed) { h = n360(h + 180); if (z.axis.on && !z.axis.both) warn = 'Sens inversé : la zone n\'autorise pas cet axe dans ce sens !'; }
+  return { h, why, warn, windRel: wr };
 }
-function repDist(r) { return current.target ? map.distance(LL(current.target), LL(r)) : 0; }
-// Toutes les positions à faire tenir dans un cadrage
-function figurePoints() {
-  const pts = [];
-  if (current.target) pts.push(current.target);
-  const f = figure();
-  if (f) {
-    pts.push(...f.arc, f.cur.ll);
-    if (current.params.ticks !== false) { // cercle gradué autour de la cible, chiffres compris
-      const rr = Math.max(25, f.R * 0.45) * 1.3;
-      for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4; pts.push(Geo.fromLocal(current.target, { x: rr * Math.sin(a), y: rr * Math.cos(a) })); }
+function solve(z, prof, rec) {
+  const p = z.params, elev = elevOf(z, rec), out = { ok: false };
+  const ch = chooseprv(z, prof); if (!ch) { out.err = 'Place au moins un point de rendez-vous (onglet Zones).'; return out; }
+  out.prv = ch.prv; out.prvAuto = ch.auto;
+  if (!prof) { out.err = 'Pas de prévision météo pour cette date et cette heure.'; return out; }
+  const decl = declAt(z), hRel = relHeight(p, prof, elev), hOpen = +p.hOpen;
+  const Va = (+p.vz) * (+p.glide), h1 = hOpen - (+p.openLoss), h2 = h1 - (+p.vz) * (+p.perpTime), hMin = +p.hMin;
+  Object.assign(out, { decl, elev, hRel, flRel: aglToFl(hRel, prof, elev), Va });
+  if (!(hRel > hOpen)) { out.err = 'La hauteur de largage doit être au-dessus de la hauteur d\'ouverture.'; return out; }
+  if (!(h2 > hMin)) { out.err = 'Plus assez de hauteur sous voile pour rejoindre le PRV (vérifie ouverture et hypothèses).'; return out; }
+  const ax = axisHeading(z, prof, hRel, decl), H = ax.h * Math.PI / 180;
+  Object.assign(out, { heading: ax.h, why: ax.why, warn: ax.warn, windRel: ax.windRel });
+  const u = { x: Math.sin(H), y: Math.cos(H) }, r = { x: Math.cos(H), y: -Math.sin(H) };
+  // 1) chute libre + ouverture (vitesse de chute), 2) 15 s perpendiculaire à l'axe, 3) navigation vers le PRV
+  const dFF = driftBetween(prof, hRel, h1, +p.vff);
+  const dP = driftBetween(prof, h1, h2, +p.vz), lat = Va * (+p.perpTime);
+  const S = [1, -1].map(s => ({ x: dFF.x + dP.x + s * lat * r.x, y: dFF.y + dP.y + s * lat * r.y }));
+  // Portée vers le PRV selon la direction suivie (route directe, dérive corrigée en crabe), du bas de la phase 2 à hMin
+  const Rt = new Float64Array(361);
+  for (let d = 0; d <= 360; d++) {
+    const a = d * Math.PI / 180, e = { x: Math.sin(a), y: Math.cos(a) }; let dist = 0;
+    for (let h = h2; h > hMin; h -= DH) {
+      const dh = Math.min(DH, h - hMin), w = windAt(prof, h - dh / 2), wp = w.u * e.x + w.v * e.y, wq = -w.u * e.y + w.v * e.x;
+      dist += (wp + Math.sqrt(Math.max(0, Va * Va - wq * wq))) * dh / (+p.vz);
     }
-    if (current.show.path) f.path.forEach(q => pts.push(q.ll));
+    Rt[d] = Math.max(0, dist);
   }
-  if (current.show.reperes) current.reperes.forEach(r => pts.push(r));
-  return pts;
+  const reach = (qx, qy) => { // depuis le point local q (début de la navigation), peut-on rejoindre le PRV ?
+    const d = Math.hypot(qx, qy); if (d < 1) return true;
+    const b = n360(Math.atan2(-qx, -qy) * 180 / Math.PI), i = Math.floor(b), f = b - i;
+    return d <= Rt[i] * (1 - f) + Rt[i + 1] * f;
+  };
+  const inside = (x, y) => reach(x + S[0].x, y + S[0].y) || reach(x + S[1].x, y + S[1].y);
+  const C0 = { x: -(S[0].x + S[1].x) / 2, y: -(S[0].y + S[1].y) / 2 };
+  let Rmax = 0; for (let d = 0; d < 360; d++) Rmax = Math.max(Rmax, Rt[d]);
+  const Rs = Rmax + lat + 200;
+  Object.assign(out, { u, r, S, C0, Rs, inside, dFF, Rmax });
+  // Recherche du plus long segment parallèle à l'axe, entièrement dans la zone
+  const step = 10;
+  const runOn = (o, tWant) => {
+    let best = null, start = null;
+    const base = { x: C0.x + o * r.x, y: C0.y + o * r.y }, n = Math.ceil(Rs / step);
+    for (let k = -n; k <= n + 1; k++) {
+      const t = k * step, inn = k <= n && inside(base.x + t * u.x, base.y + t * u.y);
+      if (inn && start === null) start = t;
+      if (!inn && start !== null) {
+        const seg = { a: start, b: t - step };
+        if (tWant != null ? (tWant >= seg.a - step && tWant <= seg.b + step) : (!best || seg.b - seg.a > best.b - best.a)) best = seg;
+        start = null;
+      }
+    }
+    return best;
+  };
+  const refine = (o, seg) => { // bords au mètre près
+    const base = { x: C0.x + o * r.x, y: C0.y + o * r.y }, ins = t => inside(base.x + t * u.x, base.y + t * u.y);
+    const edge = (tin, tout) => { for (let k = 0; k < 12; k++) { const m = (tin + tout) / 2; if (ins(m)) tin = m; else tout = m; } return tin; };
+    return { a: edge(seg.a, seg.a - step), b: edge(seg.b, seg.b + step) };
+  };
+  let bo = null, bs = null;
+  if (typeof z.offsetManual === 'number') { // vecteur placé à la main : décalage latéral mémorisé par rapport au PRV
+    const o = z.offsetManual - (C0.x * r.x + C0.y * r.y);
+    const tw = typeof z.tManual === 'number' ? z.tManual - (C0.x * u.x + C0.y * u.y) : null;
+    const s = runOn(o, tw) || runOn(o, null); if (s) { bo = o; bs = s; }
+  } else {
+    const n = Math.ceil(Rs / step);
+    for (let k = -n; k <= n; k++) { const s = runOn(k * step, null); if (s && (!bs || s.b - s.a > bs.b - bs.a)) { bs = s; bo = k * step; } }
+  }
+  if (!bs || bs.b - bs.a < 1) { out.err = 'Aucun point de largage ne permet de rejoindre le PRV à ' + hMin + ' m avec ces vents.'; out.ok = false; return out; }
+  const seg = refine(bo, bs), base = { x: C0.x + bo * r.x, y: C0.y + bo * r.y };
+  const A = { x: base.x + seg.a * u.x, y: base.y + seg.a * u.y }, B = { x: base.x + seg.b * u.x, y: base.y + seg.b * u.y };
+  out.start = Geo.fromLocal(ch.prv, A); out.end = Geo.fromLocal(ch.prv, B); out.length = seg.b - seg.a;
+  out.ok = true; return out;
+}
+// Contour de la zone de relaxation (union des deux côtés), par rayons depuis son centre
+function relaxPolygon(sol) {
+  if (!sol || !sol.inside) return null;
+  const pts = [], c = sol.C0, st = 10;
+  for (let a = 0; a < 360; a += 2) {
+    const e = { x: Math.sin(a * Math.PI / 180), y: Math.cos(a * Math.PI / 180) }; let last = -1;
+    for (let d = 0; d <= sol.Rs; d += st) if (sol.inside(c.x + d * e.x, c.y + d * e.y)) last = d;
+    if (last < 0) continue;
+    let tin = last, tout = last + st;
+    for (let k = 0; k < 8; k++) { const m = (tin + tout) / 2; if (sol.inside(c.x + m * e.x, c.y + m * e.y)) tin = m; else tout = m; }
+    pts.push(Geo.fromLocal(sol.prv, { x: c.x + tin * e.x, y: c.y + tin * e.y }));
+  }
+  return pts.length > 10 ? pts : null;
 }
 
 // ---------- Carte ----------
@@ -158,11 +337,11 @@ function syncCompass() {
 let rotT = 0;
 map.on('rotate', () => { syncCompass(); current.bearing = map.getBearing(); clearTimeout(rotT); rotT = setTimeout(persist, 400); });
 
-
 const fig = L.layerGroup().addTo(map);
 const grads = L.layerGroup().addTo(map);
-let placing = null, posMarker = null; // placing : null | 'T' (cible) | 'R' (repère)
-let markerT = null; const repMarkers = {};
+let placing = null, posMarker = null; // placing : null | 'P' (PRV)
+const prvMarkers = {};
+let solKey = '', sol = null, prof = null, wxRec = null, relaxPts = null, relaxKey = '';
 
 function dotIcon(color, size, label, cls) {
   return L.divIcon({
@@ -172,67 +351,49 @@ function dotIcon(color, size, label, cls) {
   });
 }
 const LL = p => [p.lat, p.lng];
-
 let raf = 0;
-function redraw() { cancelAnimationFrame(raf); raf = requestAnimationFrame(draw); }
+function redraw() { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => draw()); } // draw(false) : dessin complet
 let lightT = 0;
-function drawLight() { const n = performance.now(); if (n - lightT > 60) { lightT = n; draw(); } }
-const mPerPx = ll => 40075016.686 * Math.cos(ll.lat * Math.PI / 180) / Math.pow(2, map.getZoom() + 8);
+function drawLight() { const n = performance.now(); if (n - lightT > 60) { lightT = n; draw(true); } }
 
-function draw() {
+// Recalcule le vecteur (sans réseau : prévision gardée en mémoire)
+function compute() {
+  wxRec = wxCached(current.id, current.when.slice(0, 10));
+  const elev = elevOf(current, wxRec);
+  prof = wxProfile(wxRec, current.when, elev);
+  const key = JSON.stringify([current.id, current.when, current.prvs, current.params, current.axis, current.elevManual, current.prvManual,
+    current.headingOverride, current.reversed, current.offsetManual, current.tManual, elev, wxRec && wxRec.fetched]);
+  if (key !== solKey) { sol = solve(current, prof, wxRec); solKey = key; }
+  if (sol.ok) current.vector = { when: current.when, start: sol.start, end: sol.end, heading: sol.heading, length: Math.round(sol.length), decl: sol.decl, prv: sol.prv.id };
+}
+function draw(light) {
+  if (typeof Photo !== 'undefined') Photo.sync();
   fig.clearLayers(); grads.clearLayers();
-  if ((typeof Photo !== 'undefined')) Photo.sync();
-  updateInfo(); syncQuick(); syncPlaceBtn();
-  if (!hasTarget()) {
-    if (placing) placeBanner(); else setBanner('Pour commencer : ☰ → ＋ Nouvelle zone, puis place la cible.');
-    placeMarkers(); return;
+  compute();
+  updateInfo(); syncQuick(); syncPlaceBtn(); syncJump(); fillInputs(true);
+  if (placing) placeBanner();
+  else if (!current.prvs.length) setBanner(current.id ? 'Place les points de rendez-vous : ☰ Zones → PRV → Toucher la carte.' : 'Pour commencer : ☰ → ＋ Nouvelle zone.');
+  else if (!sol.ok) setBanner(sol.err);
+  else setBanner(sol.warn || null);
+  // Ancien vecteur gardé (gris, pointillés)
+  const pv = current.prevVector;
+  if (pv && current.show.prev !== false) {
+    L.polyline([LL(pv.start), LL(pv.end)], { color: '#aaa', weight: 3, dashArray: '6 6', interactive: false }).addTo(fig);
+    L.marker(LL(pv.end), { interactive: false, icon: L.divIcon({ className: 'plabel prevl', iconSize: [0, 0], html: `<span>${fmtWhen(pv.when)}</span>` }) }).addTo(grads);
   }
-  if (!placing) setBanner(hasWind() ? null : 'Règle le vent du jour : bouton 🌬 à gauche.');
-  const f = figure(), sh = current.show;
-  if (f) {
-    // Graduations en degrés autour de la cible (pour lire la direction du vent)
-    if (current.params.ticks !== false) degRing(current.target, Math.max(25, f.R * 0.45), '#ffffff');
-    // Secteur de finale : sommet sur la cible, ouvert côté sous le vent, jusqu'à la prépo affichée
-    if (sh.sector) {
-      L.polygon([LL(current.target), ...f.arc.map(LL)], { color: C_SECTOR, weight: 2, fillColor: C_SECTOR, fillOpacity: .16, interactive: false }).addTo(fig);
+  if (sol.ok) {
+    if (current.show.relax) {
+      const key = [current.when, sol.heading, sol.prv.id, JSON.stringify(current.params), sol.elev].join('|');
+      if (!light && key !== relaxKey) { relaxPts = relaxPolygon(sol); relaxKey = key; }
+      if (relaxPts) L.polygon(relaxPts.map(LL), { color: C_RELAX, weight: 2, dashArray: '6 5', fillColor: C_RELAX, fillOpacity: .08, interactive: false }).addTo(fig);
     }
-    // Chemin des prépos de 0 au vent max, gradué tous les 1 m/s
-    if (sh.path && sh.prepo) {
-      const pl = f.path.map(q => LL(q.ll));
-      L.polyline(pl, { color: '#000', weight: 5, opacity: .45, interactive: false }).addTo(fig);
-      L.polyline(pl, { color: C_PATH, weight: 2.5, interactive: false }).addTo(fig);
-      const step = pathLabelStep(f);
-      f.path.forEach(q => {
-        L.circleMarker(LL(q.ll), { radius: 3, color: '#111', weight: 1, fillColor: C_PATH, fillOpacity: 1, interactive: false }).addTo(fig);
-        if (q.wind % step === 0 || q.wind === f.path.length - 1)
-          L.marker(LL(q.ll), { interactive: false, icon: L.divIcon({ className: 'plabel', iconSize: [0, 0], html: `<span>${q.wind}</span>` }) }).addTo(grads);
-      });
-    }
-    // Prépo du vent saisi (point, ou zone si réglée) + sa hauteur
-    if (sh.prepo) {
-      if (f.zoneR > 0) L.circle(LL(f.cur.ll), { radius: f.zoneR, color: C_PREPO, weight: 2, fillOpacity: .12, dashArray: '5 5', interactive: false }).addTo(fig);
-      L.marker(LL(f.cur.ll), { interactive: false, zIndexOffset: 500, icon: dotIcon(C_PREPO, 16, `${Math.round(f.cur.h)} m`, 'big') }).addTo(fig);
-    }
+    const a = LL(sol.start), b = LL(sol.end);
+    L.polyline([a, b], { color: '#fff', weight: 10, opacity: .85, interactive: false }).addTo(fig);
+    L.polyline([a, b], { color: '#000', weight: 5, interactive: false }).addTo(fig);
+    L.marker(a, { interactive: false, zIndexOffset: 600, icon: dotIcon(C_START, 18, '', 'big') }).addTo(fig);
+    L.marker(b, { interactive: false, zIndexOffset: 600, icon: dotIcon(C_END, 18, '', 'big') }).addTo(fig);
   }
   placeMarkers();
-}
-function pathLabelStep(f) { // chiffres du chemin : pas plus serrés que ~26 px
-  const a = map.latLngToContainerPoint(LL(f.path[0].ll)), b = map.latLngToContainerPoint(LL(f.path[f.path.length - 1].ll));
-  const per = Math.hypot(b.x - a.x, b.y - a.y) / Math.max(1, f.path.length - 1);
-  return per >= 26 ? 1 : per >= 13 ? 2 : per >= 7 ? 5 : 100;
-}
-function degRing(center, radius, color) {
-  const mpp = mPerPx(center);
-  L.circle(LL(center), { radius, color, weight: 1.5, opacity: .8, fill: false, dashArray: '4 6', interactive: false }).addTo(grads);
-  const degs = Geo.degTicks(radius / mpp);
-  const pt = (deg, d) => { const a = deg * Math.PI / 180; return LL(Geo.fromLocal(center, { x: d * Math.sin(a), y: d * Math.cos(a) })); };
-  const segs = [];
-  degs.forEach(deg => {
-    segs.push([pt(deg, radius), pt(deg, radius - 10 * mpp)]);
-    L.marker(pt(deg, radius + 15 * mpp), { interactive: false,
-      icon: L.divIcon({ className: 'glabel', html: `<span style="color:${color}">${deg}°</span>`, iconSize: [0, 0] }) }).addTo(grads);
-  });
-  L.polyline(segs, { color, weight: 1.5, interactive: false }).addTo(grads);
 }
 
 const isDragging = m => !!(m && (m._lpDragging || (m.dragging && m.dragging._draggable && m.dragging._draggable._moving)));
@@ -283,57 +444,107 @@ function longPressDrag(marker, onMove, onEnd, onStart) {
   };
   el.addEventListener('touchstart', down, { passive: true }); el.addEventListener('mousedown', down);
 }
-
-// ---------- Cible et repères : appui long pour déplacer, appui court sur un repère = nom / suppression ----------
-const targetIcon = L.divIcon({ className: 'target', iconSize: [34, 34], iconAnchor: [17, 17], html: '<span></span>' });
-function repIcon(r) {
-  const d = Math.round(repDist(r));
-  return L.divIcon({ className: 'rep', iconSize: [26, 26], iconAnchor: [13, 13],
-    html: `<span></span><b>${r.name ? esc(r.name) + ' · ' : ''}${d} m</b>` });
+// ---------- PRV, vecteur et son étiquette ----------
+function prvIcon(used) {
+  return L.divIcon({ className: 'prv' + (used ? ' used' : ''), iconSize: [30, 30], iconAnchor: [15, 15], html: '<span></span>' });
 }
+// Appui long sans glisser → action (ex. menu d'un PRV)
+function longPressAction(m, cb) {
+  const el = m.getElement(); if (!el) return;
+  let t = null, s = null, fired = false;
+  const pt = e => (e.touches ? e.touches[0] : e);
+  const cancel = () => { clearTimeout(t); t = null; };
+  el.addEventListener('touchstart', e => { if (e.touches.length > 1) return; const p = pt(e); s = { x: p.clientX, y: p.clientY }; fired = false; cancel(); t = setTimeout(() => { t = null; fired = true; suppressClickUntil = Date.now() + 600; const d = map.dragging && map.dragging._draggable; if (d) d.finishDrag(true); if (navigator.vibrate) try { navigator.vibrate(25); } catch (er) {} cb(); }, HOLD_MS); }, { passive: true });
+  // fin d'un appui long : pas de « clic » fantôme sur la fenêtre qui vient de s'ouvrir
+  el.addEventListener('touchend', e => { if (fired) { e.preventDefault(); fired = false; } }, { passive: false });
+  el.addEventListener('mousedown', e => { s = { x: e.clientX, y: e.clientY }; cancel(); t = setTimeout(() => { t = null; suppressClickUntil = Date.now() + 600; cb(); }, HOLD_MS); });
+  const mv = e => { if (!t || !s) return; const p = pt(e); if (p && Math.hypot(p.clientX - s.x, p.clientY - s.y) > MOVE_TOL) cancel(); };
+  el.addEventListener('touchmove', mv, { passive: true }); el.addEventListener('mousemove', mv);
+  ['touchend', 'touchcancel', 'mouseup', 'mouseleave'].forEach(ev => el.addEventListener(ev, cancel));
+}
+let vecHit = null, vecLabel = null;
 function placeMarkers() {
-  if (current.target) {
-    if (!markerT) {
-      markerT = L.marker(LL(current.target), { icon: targetIcon, zIndexOffset: 1000 }).addTo(map);
-      longPressDrag(markerT, ll => { current.target = ll; drawLight(); }, () => { persist(); redraw(); });
-    } else if (!isDragging(markerT)) markerT.setLatLng(LL(current.target));
-  } else if (markerT) { map.removeLayer(markerT); markerT = null; }
-  const shown = current.show.reperes ? current.reperes : [];
-  Object.keys(repMarkers).forEach(id => { if (!shown.find(r => r.id === id)) { map.removeLayer(repMarkers[id]); delete repMarkers[id]; } });
-  shown.forEach(r => {
-    let m = repMarkers[r.id];
-    if (!m) {
-      m = repMarkers[r.id] = L.marker(LL(r), { icon: repIcon(r), zIndexOffset: 900 }).addTo(map);
-      longPressDrag(m, ll => { const q = current.reperes.find(x => x.id === r.id); if (q) { q.lat = ll.lat; q.lng = ll.lng; m.setIcon(repIcon(q)); } },
-        () => { persist(); redraw(); });
-      m.on('click', () => { if (Date.now() < suppressClickUntil || placing || meas.active) return; editRepere(r.id); });
-    } else if (!isDragging(m)) { m.setLatLng(LL(r)); m.setIcon(repIcon(r)); }
+  const usedId = sol && sol.prv ? sol.prv.id : null;
+  Object.keys(prvMarkers).forEach(id => { if (!current.prvs.find(p => p.id === id)) { map.removeLayer(prvMarkers[id]); delete prvMarkers[id]; } });
+  current.prvs.forEach(p => {
+    let m = prvMarkers[p.id];
+    if (!m) { m = prvMarkers[p.id] = L.marker(LL(p), { icon: prvIcon(p.id === usedId), zIndexOffset: 800 }).addTo(map); m._used = p.id === usedId; longPressAction(m, () => prvMenu(p.id)); }
+    else { m.setLatLng(LL(p)); if (m._used !== (p.id === usedId)) { m.setIcon(prvIcon(p.id === usedId)); m._used = p.id === usedId; longPressAction(m, () => prvMenu(p.id)); } }
   });
+  // Trait du vecteur : appui long puis glisser = déplacer (longueur recalculée, même axe)
+  if (sol && sol.ok) {
+    if (!vecHit) {
+      const line = L.polyline([LL(sol.start), LL(sol.end)], { color: '#fff', weight: 30, opacity: 0, interactive: true, bubblingMouseEvents: true }).addTo(map);
+      const handle = { _lpDragging: false, getElement: () => line._path, setLatLng: () => {} };
+      vecHit = { line, handle };
+      longPressDrag(handle, ll => { setManualPoint(ll); draw(true); }, () => { persist(); redraw(); toast('Vecteur déplacé. « Vect. auto » (à gauche) pour revenir au meilleur placement.'); });
+    } else if (!vecHit.handle._lpDragging) vecHit.line.setLatLngs([LL(sol.start), LL(sol.end)]);
+    if (!map.hasLayer(vecHit.line)) vecHit.line.addTo(map);
+    // Étiquette : cap magnétique et longueur ; appui long sur le cap = le modifier
+    const mid = labelPos();
+    const html = `<span><b class="vcap">${hdg(sol.heading - sol.decl)} M</b> · ${fmtInt(sol.length)} m</span>`;
+    if (!vecLabel) { vecLabel = L.marker(LL(mid), { zIndexOffset: 1200, icon: L.divIcon({ className: 'vlabel', iconSize: [0, 0], html }) }).addTo(map); vecLabel._html = html; longPressAction(vecLabel, editHeading); }
+    else { vecLabel.setLatLng(LL(mid)); if (vecLabel._html !== html) { vecLabel.setIcon(L.divIcon({ className: 'vlabel', iconSize: [0, 0], html })); vecLabel._html = html; longPressAction(vecLabel, editHeading); } }
+    if (!map.hasLayer(vecLabel)) vecLabel.addTo(map);
+  } else {
+    if (vecHit && map.hasLayer(vecHit.line)) map.removeLayer(vecHit.line);
+    if (vecLabel && map.hasLayer(vecLabel)) map.removeLayer(vecLabel);
+  }
+}
+// Étiquette du vecteur posée à côté du trait (pas dessus), pour laisser le trait libre à l'appui long
+function labelPos() {
+  const a = map.latLngToContainerPoint(LL(sol.start)), b = map.latLngToContainerPoint(LL(sol.end));
+  const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, L0 = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  let px = -(b.y - a.y) / L0, py = (b.x - a.x) / L0; if (px < 0 || (px === 0 && py < 0)) { px = -px; py = -py; }
+  const el = vecLabel && vecLabel.getElement() && vecLabel.getElement().querySelector('span');
+  const w = el ? el.offsetWidth : 190, h = el ? el.offsetHeight : 34;
+  const d = Math.abs(px) * w / 2 + Math.abs(py) * h / 2 + 12;
+  const ll = map.containerPointToLatLng([m.x + px * d, m.y + py * d]);
+  return { lat: ll.lat, lng: ll.lng };
 }
 function resetMarkers() {
-  if (markerT) { map.removeLayer(markerT); markerT = null; }
-  Object.keys(repMarkers).forEach(id => { map.removeLayer(repMarkers[id]); delete repMarkers[id]; });
+  Object.keys(prvMarkers).forEach(id => { map.removeLayer(prvMarkers[id]); delete prvMarkers[id]; });
+  if (vecHit && map.hasLayer(vecHit.line)) map.removeLayer(vecHit.line);
+  if (vecLabel && map.hasLayer(vecLabel)) map.removeLayer(vecLabel);
 }
-async function editRepere(id) {
-  const r = current.reperes.find(x => x.id === id); if (!r) return;
-  const res = await ask(`Repère à ${Math.round(repDist(r))} m de la cible. Nom (facultatif) :`, r.name || '', 'Supprimer');
-  if (res === 'DELETE') { current.reperes = current.reperes.filter(x => x.id !== id); persist(); redraw(); toast('Repère supprimé'); return; }
+function setManualPoint(ll) {
+  if (!sol || !sol.ok) return;
+  const q = Geo.toLocal(sol.prv, ll);
+  current.offsetManual = q.x * sol.r.x + q.y * sol.r.y; current.tManual = q.x * sol.u.x + q.y * sol.u.y;
+}
+async function prvMenu(id) {
+  const p = current.prvs.find(x => x.id === id); if (!p) return;
+  const used = sol && sol.prv && sol.prv.id === id;
+  const res = await ask(used ? (current.prvManual ? 'Ce PRV est la référence (choisi à la main).' : 'Ce PRV est la référence (choix automatique).') : 'Utiliser ce point de rendez-vous comme référence ?', undefined, 'Supprimer', used ? 'OK' : 'Utiliser');
+  if (res === 'DELETE') {
+    if (!(await ask('Supprimer ce point de rendez-vous ?'))) return;
+    current.prvs = current.prvs.filter(x => x.id !== id); if (current.prvManual === id) current.prvManual = null;
+    persist(); redraw(); return;
+  }
+  if (res === true && !used) { current.prvManual = id; current.offsetManual = null; persist(); redraw(); toast('PRV choisi à la main. « PRV auto » pour revenir au choix automatique.'); }
+}
+async function editHeading() {
+  if (!sol || !sol.ok) return;
+  const res = await ask(`Cap de largage (° magnétiques). Vide = automatique (${sol.why}).`, typeof current.headingOverride === 'number' ? String(Math.round(n360(sol.heading - sol.decl - (current.reversed ? 180 : 0)))) : '');
   if (res === null) return;
-  r.name = res; if (repMarkers[id]) repMarkers[id].setIcon(repIcon(r)); persist();
+  if (res === '') current.headingOverride = null;
+  else { const v = parseFloat(res.replace(',', '.')); if (isNaN(v)) return; current.headingOverride = n360(v + sol.decl); }
+  current.reversed = false; current.offsetManual = null; persist(); redraw();
 }
-function addRepere(p) {
-  current.reperes.push({ id: 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), lat: p.lat, lng: p.lng, name: '' });
-  current.show.reperes = true; persist(); redraw();
-  toast(`Repère placé à ${Math.round(repDist(p))} m de la cible. Touche-le pour le nommer ou le supprimer.`);
-}
-function setTarget(p) {
-  current.target = p; persist(); redraw();
-  if (!hasWind()) { openWind(); toast('Cible placée. Règle maintenant le vent du jour.'); }
-  else { fitFigure(); toast('Cible placée. Appui long dessus pour la déplacer.'); }
+function addPrv(p) {
+  current.prvs.push({ id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), lat: p.lat, lng: p.lng });
+  persist(); redraw();
+  toast(`PRV placé (${current.prvs.length}). Appui long sur un PRV : l'utiliser comme référence ou le supprimer.`);
+  ensureWx(false);
 }
 
-// Cadre la figure dans la partie libre de l'écran (hors barre du haut, boutons de gauche, zoom),
-// en tenant compte de la rotation de la carte (fitBounds de Leaflet l'ignore).
+// Points à faire tenir à l'écran (et dans le PDF) : vecteur, PRV, zone de relaxation affichée
+function figurePoints() {
+  const pts = current.prvs.map(p => ({ lat: p.lat, lng: p.lng }));
+  if (sol && sol.ok) { pts.push(sol.start, sol.end); if (current.show.relax && relaxPts) relaxPts.forEach(p => pts.push(p)); }
+  if (current.prevVector && current.show.prev !== false) pts.push(current.prevVector.start, current.prevVector.end);
+  return pts;
+}
 function freeRect() {
   const W = map.getSize().x, H = map.getSize().y, m = 14;
   const top = $('top').getBoundingClientRect(), quick = $('quick').getBoundingClientRect();
@@ -357,12 +568,17 @@ function fitFigure() {
   }
 }
 
-
 function updateInfo() {
-  const f = figure();
-  $('axisInfo').textContent = !hasTarget() ? 'Cible pas encore placée.'
-    : !hasWind() ? 'Vent du jour pas encore réglé (bouton 🌬 sur la carte).'
-    : `Vent du ${hdg(current.windDir)} (${cardOf(current.windDir)}) · ${fmt1(current.windSpeed)} m/s · finale au ${hdg(finalHeading())} · prépo ${current.side === 'D' ? 'à droite' : 'à gauche'} : ${Math.round(f.cur.d)} m en profondeur, ${Math.round(f.cur.s)} m de déport, ${Math.round(f.cur.h)} m de hauteur`;
+  let t = '';
+  if (sol && sol.ok) {
+    t = `Vecteur ${hdg(sol.heading - sol.decl)} M (${hdg(sol.heading)} vrai, déclinaison ${fmt1(sol.decl)}°) · ${fmtInt(sol.length)} m · ${sol.why}` +
+      ` · largage FL${Math.round(sol.flRel)} = ${fmtInt(sol.hRel)} m sol · vent de largage ${hdg(sol.windRel.dir)} ${Math.round(sol.windRel.spd * KT)} kt` +
+      ` · PRV ${sol.prvAuto ? 'automatique (le plus au vent)' : 'choisi à la main'}`;
+  } else if (sol && sol.err) t = sol.err;
+  $('axisInfo').textContent = t;
+  $('elevAuto').textContent = typeof current.elevAuto === 'number' ? `automatique : ${current.elevAuto} m` : 'automatique : inconnue (pas encore de prévision)';
+  $('prevBox').classList.toggle('hidden', !current.prevVector);
+  if (current.prevVector) $('prevInfo').textContent = `Ancien vecteur du ${fmtWhen(current.prevVector.when)} : ${hdg(current.prevVector.heading - (current.prevVector.decl || 0))} M, ${fmtInt(current.prevVector.length)} m`;
 }
 
 // ---------- Interface ----------
@@ -371,86 +587,154 @@ function updateInfo() {
 function $(id) { return document.getElementById(id) || document.createElement('div'); }
 function setBanner(t) { const b = $('banner'); if (!t) b.classList.add('hidden'); else { b.textContent = t; b.classList.remove('hidden'); } }
 let toastT;
-function toast(t) { const el = $('toast'); el.textContent = t; el.classList.remove('hidden'); clearTimeout(toastT); toastT = setTimeout(() => el.classList.add('hidden'), 2800); }
-const numFields = PROFILE_KEYS;
+function toast(t) { const el = $('toast'); el.textContent = t; el.classList.remove('hidden'); clearTimeout(toastT); toastT = setTimeout(() => el.classList.add('hidden'), 3200); }
+const numIn = el => parseFloat(String(el.value).replace(',', '.'));
+const HYP = ['vff', 'openLoss', 'perpTime', 'vz', 'glide', 'hMin'];
+function setParam(k, v) { current.params[k] = v; profile[k] = v; store.set('vl.profile', profile); zones.forEach(applyProfile); store.set('vl.zones', zones); }
 function fillInputs(only) {
   const p = current.params;
-  (only || numFields).forEach(k => { const el = $('p_' + k); if (el && document.activeElement !== el) el.value = p[k] == null ? '' : String(p[k]).replace('.', ','); });
+  HYP.concat(['hOpen']).forEach(k => { const el = $('p_' + k); if (el && document.activeElement !== el) el.value = String(p[k]).replace('.', ','); });
+  // largage : FL et m sol liés (on garde la valeur saisie en dernier, l'autre est recalculée avec la prévision)
+  const elev = elevOf(current, wxRec);
+  const agl = p.relMode === 'AGL' ? +p.relAGL : flToAgl(+p.relFL, prof, elev), fl = p.relMode === 'FL' ? +p.relFL : aglToFl(+p.relAGL, prof, elev);
+  ['p_relFL', 'j_relFL'].forEach(id => { if (document.activeElement !== $(id)) $(id).value = Math.round(fl); });
+  ['p_relAGL', 'j_relAGL'].forEach(id => { if (document.activeElement !== $(id)) $(id).value = Math.round(agl); });
+  if (document.activeElement !== $('j_hOpen')) $('j_hOpen').value = p.hOpen;
+  $('vhInfo').textContent = `Vitesse horizontale sous voile : ${fmt1((+p.vz) * (+p.glide))} m/s (vitesse verticale × finesse).`;
   if (only) return;
-  syncQuick(); syncWind();
+  $('z_axisOn').checked = !!current.axis.on; $('z_axisBoth').checked = current.axis.both !== false;
+  if (document.activeElement !== $('z_axisMag')) $('z_axisMag').value = current.axis.on ? Math.round(current.axis.mag) : (current.axis.mag || '');
+  $('axisRow').classList.toggle('dim', !current.axis.on);
+  if (document.activeElement !== $('z_elev')) $('z_elev').value = typeof current.elevManual === 'number' ? current.elevManual : '';
+  syncQuick(); syncJump();
   $('zoneName').textContent = current.name + (current.id ? '' : ' (non enregistrée)');
 }
-numFields.forEach(k => {
-  $('p_' + k).addEventListener('input', e => {
-    const v = parseFloat(String(e.target.value).trim().replace(',', '.'));
-    if (isNaN(v)) return;
-    current.params[k] = v; profile[k] = v; store.set('vl.profile', profile); // réglage de manœuvre : toutes les zones suivent
-    zones.forEach(applyProfile); store.set('vl.zones', zones);
-    persist(); redraw();
-  });
-  $('p_' + k).addEventListener('blur', () => fillInputs([k]));
+HYP.concat(['hOpen']).forEach(k => {
+  $('p_' + k).addEventListener('input', e => { const v = numIn(e.target); if (isNaN(v)) return; setParam(k, v); persist(); redraw(); });
+  $('p_' + k).addEventListener('blur', () => fillInputs(true));
 });
+function setRel(mode, v) { if (isNaN(v)) return; setParam('relMode', mode); setParam(mode === 'FL' ? 'relFL' : 'relAGL', v); current.offsetManual = null; persist(); redraw(); setTimeout(() => fillInputs(true), 0); }
+['p_relFL', 'j_relFL'].forEach(id => $(id).addEventListener('change', e => setRel('FL', numIn(e.target))));
+['p_relAGL', 'j_relAGL'].forEach(id => $(id).addEventListener('change', e => setRel('AGL', numIn(e.target))));
+$('j_hOpen').addEventListener('change', e => { const v = numIn(e.target); if (!isNaN(v)) { setParam('hOpen', v); persist(); redraw(); fillInputs(true); } });
+['p_relFL', 'p_relAGL', 'j_relFL', 'j_relAGL', 'j_hOpen'].forEach(id => $(id).addEventListener('keydown', e => { if (e.key === 'Enter') e.target.blur(); }));
+
+// ---------- Onglet Zones : axe imposé, altitude du terrain, ancien vecteur ----------
+$('z_axisOn').addEventListener('change', e => { current.axis.on = e.target.checked; current.headingOverride = null; current.reversed = false; current.offsetManual = null; persist(); fillInputs(); redraw(); });
+$('z_axisBoth').addEventListener('change', e => { current.axis.both = e.target.checked; persist(); redraw(); });
+$('z_axisMag').addEventListener('change', e => { const v = numIn(e.target); if (isNaN(v)) return; current.axis.mag = n360(v); current.axis.on = true; current.headingOverride = null; current.offsetManual = null; persist(); fillInputs(); redraw(); });
+$('z_elev').addEventListener('change', e => { const raw = e.target.value.trim(); current.elevManual = raw === '' ? null : numIn(e.target); if (isNaN(current.elevManual)) current.elevManual = null; persist(); fillInputs(); redraw(); });
+$('prevToggle').addEventListener('click', () => { current.show.prev = current.show.prev === false; persist(); redraw(); });
+$('prevDel').addEventListener('click', async () => { if (await ask('Supprimer l\'ancien vecteur ?')) { current.prevVector = null; persist(); redraw(); } });
 
 // ---------- Bascules rapides sur la carte ----------
 function syncQuick() {
-  const sh = current.show;
-  $('qSide').textContent = current.side === 'D' ? 'Prépo D ▶' : '◀ Prépo G';
-  [['qSector', 'sector'], ['qPrepo', 'prepo'], ['qPath', 'path'], ['qReperes', 'reperes']].forEach(([id, k]) => $(id).classList.toggle('on', !!sh[k]));
-  $('qTicks').classList.toggle('on', current.params.ticks !== false);
-  $('qWind').innerHTML = hasWind() ? `🌬 ${hdg(current.windDir)}<br>${fmt1(current.windSpeed)} m/s` : '🌬 vent';
-  $('qWind').classList.toggle('warn', !hasWind());
+  const p = current.params;
+  $('qWhen').innerHTML = `🕑 ${fmtWhen(current.when)}`;
+  $('qRel').innerHTML = sol && sol.flRel ? `FL${Math.round(sol.flRel)}<br>${fmtInt(p.hOpen)} m` : `FL${Math.round(p.relMode === 'FL' ? p.relFL : aglToFl(+p.relAGL, prof, elevOf(current, wxRec)))}<br>${fmtInt(p.hOpen)} m`;
+  $('qRelax').classList.toggle('on', !!current.show.relax);
+  $('qRev').classList.toggle('on', !!current.reversed);
+  $('qPrv').textContent = current.prvManual ? 'PRV man.' : 'PRV auto'; $('qPrv').classList.toggle('on', !!current.prvManual);
+  $('qVecAuto').classList.toggle('hidden', typeof current.offsetManual !== 'number');
+  $('qWinds').classList.toggle('on', !$('windsBox').classList.contains('hidden'));
 }
 function quick(fn, msg) { fn(); syncQuick(); persist(); redraw(); if (msg) toast(msg()); }
-$('qSide').addEventListener('click', () => quick(() => { current.side = current.side === 'D' ? 'G' : 'D'; }, () => `Prépo à ${current.side === 'D' ? 'droite' : 'gauche'} (face à la cible, face au vent)`));
-const SHOW_NAMES = { sector: 'Secteur de finale', prepo: 'Prépo', path: 'Chemin des prépos 0 → vent max', reperes: 'Repères' };
-[['qSector', 'sector'], ['qPrepo', 'prepo'], ['qPath', 'path'], ['qReperes', 'reperes']].forEach(([id, k]) =>
-  $(id).addEventListener('click', () => quick(() => { current.show[k] = !current.show[k]; }, () => `${SHOW_NAMES[k]} ${current.show[k] ? 'affiché' : 'masqué'}`)));
-$('qTicks').addEventListener('click', () => quick(() => { current.params.ticks = current.params.ticks === false; }, () => current.params.ticks ? 'Graduations affichées' : 'Graduations masquées'));
+$('qRelax').addEventListener('click', () => quick(() => { current.show.relax = !current.show.relax; }, () => current.show.relax ? 'Zone de relaxation affichée' : 'Zone de relaxation masquée'));
+$('qRev').addEventListener('click', () => quick(() => { current.reversed = !current.reversed; current.offsetManual = null; },
+  () => current.reversed ? (current.axis.on && !current.axis.both ? '⚠️ Sens inversé : la zone n\'autorise pas cet axe dans ce sens' : 'Sens de l\'axe inversé') : 'Sens normal'));
+$('qPrv').addEventListener('click', () => { if (!current.prvManual) return toast('PRV automatique (le plus au vent). Appui long sur un PRV pour le choisir à la main.'); quick(() => { current.prvManual = null; current.offsetManual = null; }, () => 'PRV automatique (le plus au vent)'); });
+$('qVecAuto').addEventListener('click', () => quick(() => { current.offsetManual = null; current.tManual = null; }, () => 'Vecteur replacé au mieux (le plus long)'));
 
-// ---------- Vent du jour : direction (d'où il vient) et force, réglables sur la carte ----------
-function syncWind() {
-  if (document.activeElement !== $('w_dir')) $('w_dir').value = hasWind() ? Math.round(current.windDir) : '';
-  if (document.activeElement !== $('w_spd')) $('w_spd').value = fmt1(current.windSpeed || 0);
-  $('windInfo').textContent = hasWind() ? `Finale au ${hdg(finalHeading())} (${cardOf(finalHeading())}), face au vent` : 'Indique d\'où vient le vent (en degrés).';
+// ---------- Saut : date, heure, hauteurs (sur la carte) ----------
+function syncJump() {
+  if (document.activeElement !== $('j_date')) $('j_date').value = current.when.slice(0, 10);
+  $('j_hour').textContent = current.when.slice(11, 13) + ' h';
+  $('wxInfo').innerHTML = wxStatus(wxRec, current.when);
 }
-function openWind() { $('windBox').classList.remove('hidden'); syncWind(); }
-function setWind(dir, spd) {
-  if (dir !== undefined && !isNaN(dir)) current.windDir = ((Math.round(dir) % 360) + 360) % 360;
-  if (spd !== undefined && !isNaN(spd)) current.windSpeed = Math.max(0, Math.round(spd * 10) / 10);
-  persist(); syncWind(); redraw();
+const fmtFetched = ts => { const d = new Date(ts); return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)} à ${pad2(d.getHours())}h${pad2(d.getMinutes())}`; };
+const wxFailed = {}; // jour → dernier téléchargement raté
+function wxStatus(rec, when) {
+  if (!rec) return navigator.onLine === false || wxFailed[when.slice(0, 10)] ? '⚠️ Pas de réseau et aucune prévision gardée pour ce jour.' : 'Prévision en cours de téléchargement…';
+  const st = fmtFetched(rec.fetched);
+  const ok = (rec.hourly.time || []).includes(when);
+  return `${rec.model} · prévision téléchargée le ${st}${Date.now() - rec.fetched > 3 * 3600e3 ? ' <b class="warn">(ancienne : mets à jour si tu as du réseau)</b>' : ''}${ok ? '' : ' <b class="warn">(pas de donnée à cette heure)</b>'}`;
 }
-$('qWind').addEventListener('click', () => $('windBox').classList.contains('hidden') ? openWind() : $('windBox').classList.add('hidden'));
-$('windOk').addEventListener('click', () => { $('windBox').classList.add('hidden'); if (hasTarget() && hasWind()) fitFigure(); });
-document.querySelectorAll('[data-wdir]').forEach(b => b.addEventListener('click', () => setWind((hasWind() ? current.windDir : 0) + +b.dataset.wdir)));
-document.querySelectorAll('[data-wspd]').forEach(b => b.addEventListener('click', () => setWind(undefined, (current.windSpeed || 0) + +b.dataset.wspd)));
-const numIn = el => parseFloat(String(el.value).replace(',', '.'));
-$('w_dir').addEventListener('change', e => setWind(numIn(e.target)));
-$('w_spd').addEventListener('change', e => setWind(undefined, numIn(e.target)));
-['w_dir', 'w_spd'].forEach(id => $(id).addEventListener('keydown', e => { if (e.key === 'Enter') e.target.blur(); }));
+let wxBusy = false;
+async function ensureWx(force, date) {
+  date = date || current.when.slice(0, 10);
+  const have = wxCached(current.id, date);
+  if (have && !force && Date.now() - have.fetched < 3600e3) return have;
+  if (wxBusy) return have; wxBusy = true; $('wxInfo').innerHTML = 'Téléchargement de la prévision…';
+  try { const r = await wxFetch(current, date); delete wxFailed[date]; persist(); return r; }
+  catch (e) { wxFailed[date] = true; toast(have ? 'Pas de réseau : prévision gardée, téléchargée le ' + fmtFetched(have.fetched) : 'Prévision impossible à télécharger (réseau ?)'); return have; }
+  finally { wxBusy = false; redraw(); setTimeout(() => fillInputs(true), 0); syncJump(); }
+}
+function setWhen(w) { current.when = w; current.offsetManual = null; persist(); redraw(); syncJump(); ensureWx(false); }
+$('qWhen').addEventListener('click', () => $('jumpBox').classList.toggle('hidden'));
+$('qRel').addEventListener('click', () => $('jumpBox').classList.toggle('hidden'));
+$('jumpOk').addEventListener('click', () => { $('jumpBox').classList.add('hidden'); if (sol && sol.ok) fitFigure(); });
+$('j_minus').addEventListener('click', () => setWhen(shiftWhen(current.when, -1)));
+$('j_plus').addEventListener('click', () => setWhen(shiftWhen(current.when, 1)));
+$('j_now').addEventListener('click', () => { current.when = nowWhen(); persist(); syncJump(); ensureWx(true); });
+$('j_date').addEventListener('change', e => { if (e.target.value) setWhen(e.target.value + current.when.slice(10)); });
 
-// ---------- Placement : cible et repères, en touchant la carte ou à ma position GPS ----------
-function syncPlaceBtn() {
-  $('btnPlaceT').classList.toggle('on', placing === 'T');
-  $('btnPlaceR').classList.toggle('on', placing === 'R');
+// ---------- Tableau des vents (date et heure indépendantes de la carte) ----------
+let tWhen = null;
+function renderWinds() {
+  const date = tWhen.slice(0, 10), rec = wxCached(current.id, date), elev = elevOf(current, rec), pr = wxProfile(rec, tWhen, elev);
+  $('t_date').value = date; $('t_hour').textContent = tWhen.slice(11, 13) + ' h';
+  $('t_info').innerHTML = wxStatus(rec, tWhen) + (rec ? ` · terrain ${Math.round(elev)} m` : '');
+  const tb = $('windsTable').querySelector('tbody'); tb.innerHTML = '';
+  if (!pr) { tb.innerHTML = '<tr><td colspan="6" class="mut">Pas de donnée pour cette heure.</td></tr>'; return; }
+  windRows(pr, elev).forEach(r => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${r.lab}</td><td>${fmtInt(r.h)}</td><td>${hdg(r.dir)}</td><td>${Math.round(r.spd * KT)}</td><td>${fmt1(r.spd)}</td><td>${r.T == null ? '–' : Math.round(r.T)}</td>`;
+    tb.append(tr);
+  });
 }
-function placeBanner() { setBanner(!placing ? null : placing === 'T' ? 'Touche la carte pour placer la cible.' : 'Touche la carte pour placer le repère.'); }
-['T', 'R'].forEach(k => $('btnPlace' + k).addEventListener('click', () => {
-  if (placing === k) { placing = null; placeBanner(); syncPlaceBtn(); return; } // 2e appui : annule
-  if (k === 'R' && !hasTarget()) return toast('Place d\'abord la cible');
-  stopMeasure(); placing = k; syncPlaceBtn(); placeBanner(); closeSheet();
-}));
+function windRows(pr, elev) { // une ligne par tranche de 1 000 ft (FL), de la surface à ~10 000 m sol
+  const rows = [], add = (lab, h) => { const w = spdDir(windAt(pr, h)); rows.push({ lab, h, dir: w.dir, spd: w.spd, T: tempAt(pr, h) }); };
+  add('Sol (10 m)', 10);
+  const fl0 = Math.ceil(aglToFl(30, pr, elev) / 10) * 10;
+  for (let fl = Math.max(10, fl0); fl <= 400; fl += 10) { const h = flToAgl(fl, pr, elev); if (h > 10000) break; if (h > 20) add('FL' + String(fl).padStart(3, '0'), h); }
+  return rows;
+}
+async function setTWhen(w) { tWhen = w; renderWinds(); const d = w.slice(0, 10); if (!wxCached(current.id, d) || Date.now() - wxCached(current.id, d).fetched > 3600e3) { await ensureWx(false, d); renderWinds(); } }
+$('qWinds').addEventListener('click', () => { const b = $('windsBox'); if (!b.classList.contains('hidden')) { b.classList.add('hidden'); syncQuick(); return; } b.classList.remove('hidden'); syncQuick(); setTWhen(current.when); });
+$('t_close').addEventListener('click', () => { $('windsBox').classList.add('hidden'); syncQuick(); });
+$('t_minus').addEventListener('click', () => setTWhen(shiftWhen(tWhen, -1)));
+$('t_plus').addEventListener('click', () => setTWhen(shiftWhen(tWhen, 1)));
+$('t_now').addEventListener('click', () => setTWhen(nowWhen()));
+$('t_date').addEventListener('change', e => { if (e.target.value) setTWhen(e.target.value + tWhen.slice(10)); });
+
+// ---------- Placement des PRV : en touchant la carte ou à ma position GPS ----------
+function syncPlaceBtn() { $('btnPlaceP').classList.toggle('on', placing === 'P'); }
+function placeBanner() { setBanner(placing === 'P' ? 'Touche la carte pour placer le point de rendez-vous.' : null); }
+$('btnPlaceP').addEventListener('click', () => {
+  if (placing === 'P') { placing = null; placeBanner(); syncPlaceBtn(); return; }
+  if (!current.id) return toast('Crée ou ouvre d\'abord une zone');
+  stopMeasure(); placing = 'P'; syncPlaceBtn(); placeBanner(); closeSheet();
+});
 function gpsHere(btn, then) {
   if (!navigator.geolocation) return toast('Géolocalisation indisponible');
   const old = btn.textContent; btn.textContent = '📡 Position…'; btn.disabled = true;
   navigator.geolocation.getCurrentPosition(pos => {
     btn.textContent = old; btn.disabled = false;
-    const acc = Math.round(pos.coords.accuracy || 0);
     then({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-    if (acc) setTimeout(() => toast(`Position prise (précision GPS ± ${acc} m)`), 2900);
   }, () => { btn.textContent = old; btn.disabled = false; toast('Position refusée ou indisponible'); }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
 }
-$('btnGpsT').addEventListener('click', () => gpsHere($('btnGpsT'), p => { closeSheet(); map.setView(LL(p), Math.max(map.getZoom(), 17)); setTarget(p); }));
-$('btnGpsR').addEventListener('click', () => { if (!hasTarget()) return toast('Place d\'abord la cible'); gpsHere($('btnGpsR'), p => { closeSheet(); addRepere(p); }); });
+$('btnGpsP').addEventListener('click', () => { if (!current.id) return toast('Crée ou ouvre d\'abord une zone'); gpsHere($('btnGpsP'), p => { closeSheet(); map.setView(LL(p), Math.max(map.getZoom(), 15)); addPrv(p); }); });
+
+// À l'ouverture d'une zone : vecteur déjà calculé → l'afficher ou mettre à jour à maintenant (et garder l'ancien ?)
+async function askOldVector() {
+  const v = current.vector, now = nowWhen();
+  if (!v || !v.when || v.when === now) { current.when = now; return; }
+  const r = await ask(`Un vecteur de largage existe pour cette zone (saut du ${fmtWhen(v.when)}).`, undefined, null, 'Mettre à jour à maintenant', 'Afficher ce vecteur');
+  if (r !== true) { current.when = v.when; persist(); redraw(); syncJump(); return; }
+  const keep = await ask('Garder l\'ancien vecteur (affiché en gris, pointillés) ?', undefined, null, 'Garder', 'Non');
+  if (keep === true) { current.prevVector = clone(v); current.show.prev = true; }
+  current.when = now; persist(); redraw(); syncJump(); ensureWx(true);
+}
 
 // ---------- Mesure : cap et distance entre deux points touchés (dans l'ordre) ----------
 const measLayer = L.layerGroup().addTo(map);
@@ -504,9 +788,9 @@ map.on('click', e => {
   if ((typeof Photo !== 'undefined') && Photo.onMapClick(e)) return; // calage d'une photo aérienne en cours
   if (!placing && meas.active) { measureClick({ lat: e.latlng.lat, lng: e.latlng.lng }); return; }
   if (!placing) return;
-  const p = { lat: e.latlng.lat, lng: e.latlng.lng }, k = placing;
+  const p = { lat: e.latlng.lat, lng: e.latlng.lng };
   placing = null; placeBanner(); syncPlaceBtn();
-  if (k === 'T') setTarget(p); else addRepere(p);
+  addPrv(p);
 });
 
 map.on('zoomend', redraw);
@@ -562,29 +846,32 @@ function setSheetSize(sz) { sheetSize = sz; $('sheet').classList.toggle('mini', 
   g.addEventListener('mousedown', e => start(e.clientY));
   window.addEventListener('mouseup', e => end(e.clientY));
 })();
-let lastTab = 'reglages';
+let lastTab = 'zones';
 function openSheet(tab) {
   lastTab = tab;
   $('sheet').classList.remove('hidden'); setSheetSize(sheetSize);
   document.querySelectorAll('.tabs [data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
-  ['reglages', 'pilote'].forEach(t => $('tab-' + t).classList.toggle('hidden', t !== tab));
-  if (tab === 'reglages') renderZones();
+  ['zones', 'params'].forEach(t => $('tab-' + t).classList.toggle('hidden', t !== tab));
+  if (tab === 'zones') renderZones();
 }
 function closeSheet() { $('sheet').classList.add('hidden'); }
 // Les deux boutons en haut à gauche ouvrent leur onglet ; second appui sur le même = fermer
 function toggleTab(t) { if (!$('sheet').classList.contains('hidden') && lastTab === t) closeSheet(); else openSheet(t); }
-$('btnManeuver').addEventListener('click', () => toggleTab('pilote'));
-$('btnZones').addEventListener('click', () => toggleTab('reglages'));
+$('btnParams').addEventListener('click', () => toggleTab('params'));
+$('btnZones').addEventListener('click', () => toggleTab('zones'));
 $('btnClose').addEventListener('click', closeSheet);
 document.querySelectorAll('.tabs [data-tab]').forEach(b => b.addEventListener('click', () => openSheet(b.dataset.tab)));
 
 
-// Petite fenêtre : texte, champ facultatif, et un 3e bouton facultatif (renvoie 'DELETE')
-function ask(text, def, delLabel) {
+// Petite fenêtre : texte, champ facultatif, 3e bouton facultatif (renvoie 'DELETE'), libellés au choix
+// cancelLabel === false : pas de bouton Annuler
+function ask(text, def, delLabel, okLabel, cancelLabel) {
   return new Promise(res => {
     $('dlgText').textContent = text; $('dlgInput').value = def || ''; $('dialog').classList.remove('hidden');
     $('dlgInput').classList.toggle('hidden', def === undefined);
     $('dlgDel').classList.toggle('hidden', !delLabel); $('dlgDel').textContent = delLabel || '';
+    $('dlgOk').textContent = okLabel || 'OK';
+    $('dlgCancel').classList.toggle('hidden', cancelLabel === false); $('dlgCancel').textContent = cancelLabel || 'Annuler';
     const done = v => { $('dialog').classList.add('hidden'); $('dlgOk').onclick = $('dlgCancel').onclick = $('dlgDel').onclick = null; res(v); };
     $('dlgOk').onclick = () => done(def === undefined ? true : $('dlgInput').value.trim());
     $('dlgCancel').onclick = () => done(null);
@@ -610,7 +897,7 @@ function renderZones() {
       const rm = document.createElement('button'); rm.className = 'zoffdel'; rm.textContent = '🗑'; rm.title = 'Supprimer les photos hors-ligne';
       rm.onclick = e => { e.stopPropagation(); removeOffline(z.id); };
       off.append(rm);
-    } else if (z.target) {
+    } else if (z.prvs && z.prvs.length) {
       const dl = document.createElement('button'); dl.className = 'zoffdel'; dl.textContent = '⬇︎ hors-ligne'; dl.title = 'Télécharger les photos pour le hors-ligne';
       dl.onclick = e => { e.stopPropagation(); downloadOffline(z.id); };
       off.append(dl);
@@ -670,9 +957,10 @@ function loadZone(id) {
   resetMarkers(); placing = null; setBanner(null); stopMeasure();
   map.setBearing(current.bearing || 0);
   map.setView([current.center.lat, current.center.lng], Math.max(current.zoom || 17, 15));
-  closeSheet(); fillInputs(); redraw(); if (hasTarget()) fitFigure(); persist();
+  closeSheet(); fillInputs(); redraw(); persist();
+  askOldVector().then(() => { compute(); if (sol && sol.ok) fitFigure(); else if (current.prvs.length) map.setView(LL(prvCentroid(current)), 15); ensureWx(false); });
 }
-// Nouvelle zone : on choisit d'abord où aller (rester ici, ma position ou recherche), puis on place la cible
+// Nouvelle zone : on choisit d'abord où aller (rester ici, ma position ou recherche), puis on place les PRV
 async function startNewZone(center, zoom) {
   $('nzDlg').classList.add('hidden');
   const n = await ask('Nom de la nouvelle zone (ex. Bouloc) :', ''); if (!n) return;
@@ -681,8 +969,8 @@ async function startNewZone(center, zoom) {
   zones.push(clone(current)); store.set('vl.zones', zones);
   resetMarkers(); stopMeasure();
   map.setView([center.lat, center.lng], current.zoom);
-  placing = 'T'; fillInputs(); persist(); redraw(); closeSheet();
-  toast(`« ${n} » créée : touche la carte pour placer la cible`);
+  placing = 'P'; fillInputs(); persist(); redraw(); closeSheet();
+  toast(`« ${n} » créée : touche la carte pour placer le point de rendez-vous`);
 }
 $('btnNewZone').addEventListener('click', () => { $('searchResults').innerHTML = ''; $('nzDlg').classList.remove('hidden'); });
 $('nzCancel').addEventListener('click', () => $('nzDlg').classList.add('hidden'));
@@ -743,19 +1031,16 @@ function locate(center) {
 }
 $('btnLocate').addEventListener('click', () => locate(true));
 
-// Boussole : nord en haut. Bouton « Axe » : branche d'approche vers le haut (sens de vol vers le setup) ;
-// si les deux branches ont des caps différents, chaque appui passe à l'autre.
-// leaflet-rotate : setBearing(b) tourne la carte de +b, donc le cap h est en haut avec b = -h.
+// Boussole : nord en haut. leaflet-rotate : setBearing(b) tourne la carte de +b, donc le cap h est en haut avec b = -h.
 const normB = x => ((x % 360) + 360) % 360, diffB = (x, y) => Math.abs(((x - y + 540) % 360) - 180);
 function setMapBearing(b, msg) { map.setBearing(b); current.bearing = b; syncCompass(); persist(); if (msg) toast(msg); }
 $('btnNorth').addEventListener('click', () => setMapBearing(0, 'Nord en haut'));
-
-// Bouton « Axe » : axe de finale vers le haut (cap de finale = direction d'où vient le vent)
+// Bouton « Axe » : l'axe de largage (sens de vol) vers le haut
 $('btnAxisUp').addEventListener('click', () => {
-  if (!hasWind()) return toast('Règle d\'abord le vent du jour (🌬)');
-  setMapBearing(normB(-finalHeading()), `Axe de finale (${hdg(finalHeading())}) vers le haut`);
+  if (!sol || !sol.ok) return toast('Pas encore de vecteur');
+  setMapBearing(normB(-sol.heading), `Axe de largage (${hdg(sol.heading - sol.decl)} M) vers le haut`);
 });
-$('btnFit').addEventListener('click', () => { if (hasTarget()) fitFigure(); else toast('Place d\'abord la cible'); });
+$('btnFit').addEventListener('click', () => { if (figurePoints().length) fitFigure(); else toast('Place d\'abord un point de rendez-vous'); });
 
 // ---------- Images satellite (cache commun carte / hors-ligne / PDF) ----------
 const tileUrl = (z, x, y, src) => BASEMAPS[src || basemap].url.replace('{z}', z).replace('{x}', x).replace('{y}', y);
@@ -782,10 +1067,10 @@ function tilesAround(center, radiusM, zmin, zmax, src) {
   }
   return list;
 }
-// Photos gardées hors-ligne pour une zone : autour de la cible (700 m en détail, 2,5 km en large)
+// Photos gardées hors-ligne pour une zone : autour des PRV (1 km en détail jusqu'au zoom 18, 6 km en large)
 function offlineTiles(z, src) {
-  const center = z.target || z.center;
-  return [...new Set(tilesAround(center, 700, 12, 19, src).concat(tilesAround(center, 2500, 12, 16, src)))];
+  const center = z.prvs && z.prvs.length ? prvCentroid(z) : z.center;
+  return [...new Set(tilesAround(center, 1000, 12, 18, src).concat(tilesAround(center, 6000, 11, 15, src)))];
 }
 // Retirer le hors-ligne d'une zone : on efface ses photos, sauf celles qui servent à une autre zone gardée hors-ligne
 async function removeOffline(id) {
@@ -808,7 +1093,7 @@ const dlProgress = {}; // id de zone → « 120/1193 » pendant le téléchargem
 async function downloadOffline(id) {
   if (!('caches' in window)) { toast('Hors-ligne non pris en charge ici'); return; }
   if (dlProgress[id]) return;
-  const z = id === current.id ? current : zones.find(x => x.id === id); if (!z || !z.target) return;
+  const z = id === current.id ? current : zones.find(x => x.id === id); if (!z || !z.prvs || !z.prvs.length) return;
   const uniq = offlineTiles(z), total = uniq.length;
   if (!(await ask(`Télécharger les photos de « ${z.name} » pour le hors-ligne : ${total} images, environ ${Math.round(total * 25 / 1024)} Mo ?`))) return;
   let done = 0, fail = 0; dlProgress[id] = `0/${total}`; renderZones();
@@ -843,11 +1128,9 @@ function loadJsPdf() {
 function dateStamp() { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`; }
 function safeName(s) { return s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'zone'; }
 
-// Cap (°) placé en haut de la page : le sens de vol sur la branche d'approche, vers le setup
-// (on « monte » vers le setup puis l'axe de poser). 1re configuration affichée.
 
-// Le haut de la page = l'axe de finale (sens de vol face au vent, vers la cible)
-function pdfUpBearing() { return finalHeading(); }
+// Le haut de la page = le sens de vol sur le vecteur (axe de largage)
+function pdfUpBearing() { return sol && sol.ok ? sol.heading : 0; }
 
 async function renderPdfCanvas() {
   const pts = figurePoints();
@@ -927,48 +1210,19 @@ async function renderPdfCanvas() {
     const c = toC(ll); g.save(); g.beginPath(); g.arc(c.x, c.y, r * u, 0, 2 * Math.PI); g.fillStyle = color; g.fill();
     g.lineWidth = 1.2 * u; g.strokeStyle = '#111'; g.stroke(); g.restore(); return c;
   };
-  const fg = figure(), sh = current.show;
-  if (fg) {
-    if (current.params.ticks !== false) { // graduations autour de la cible
-      const c = toC(current.target), Rr = Math.max(25, fg.R * 0.45) * pxPerM(current.target);
-      g.save(); g.strokeStyle = '#fff'; g.globalAlpha = .8; g.lineWidth = 1.4 * u; g.setLineDash([4 * u, 6 * u]);
-      g.beginPath(); g.arc(c.x, c.y, Rr, 0, 2 * Math.PI); g.stroke(); g.setLineDash([]); g.globalAlpha = 1;
-      Geo.degTicks(Rr / u, 40).forEach(deg => {
-        const a = pageAngle(deg), l = 11 * u;
-        g.beginPath(); g.moveTo(c.x + Rr * Math.sin(a), c.y - Rr * Math.cos(a)); g.lineTo(c.x + (Rr - l) * Math.sin(a), c.y - (Rr - l) * Math.cos(a)); g.stroke();
-        shadowText(`${deg}°`, c.x + (Rr + 16 * u) * Math.sin(a), c.y - (Rr + 16 * u) * Math.cos(a), '#fff', 11, 'center');
-      });
-      g.restore();
-    }
-    if (sh.sector) {
-      g.save(); g.beginPath(); const T = toC(current.target); g.moveTo(T.x, T.y);
-      fg.arc.forEach(ll => { const q = toC(ll); g.lineTo(q.x, q.y); }); g.closePath();
-      g.fillStyle = C_SECTOR; g.globalAlpha = .18; g.fill(); g.globalAlpha = 1; g.strokeStyle = C_SECTOR; g.lineWidth = 2.4 * u; g.stroke(); g.restore();
-    }
-    if (sh.path && sh.prepo) {
-      g.save(); g.beginPath(); fg.path.forEach((q, i) => { const c = toC(q.ll); i ? g.lineTo(c.x, c.y) : g.moveTo(c.x, c.y); });
-      g.strokeStyle = 'rgba(0,0,0,.5)'; g.lineWidth = 5 * u; g.stroke(); g.strokeStyle = C_PATH; g.lineWidth = 2.6 * u; g.stroke(); g.restore();
-      fg.path.forEach(q => { const c = dot(q.ll, C_PATH, 3.2); shadowText(`${q.wind}`, c.x + 8 * u, c.y - 8 * u, C_PATH, 11); });
-    }
-    if (sh.prepo) {
-      if (fg.zoneR > 0) {
-        const c = toC(fg.cur.ll); g.save(); g.strokeStyle = C_PREPO; g.lineWidth = 2.2 * u; g.setLineDash([6 * u, 6 * u]);
-        g.beginPath(); g.arc(c.x, c.y, fg.zoneR * pxPerM(fg.cur.ll), 0, 2 * Math.PI); g.stroke(); g.restore();
-      }
-      const c = dot(fg.cur.ll, C_PREPO, 8.5);
-      shadowText(`${Math.round(fg.cur.h)} m`, c.x + 14 * u, c.y, C_PREPO, 15);
-    }
-  }
-  // Cible
-  { const c = toC(current.target); g.save();
-    [[11, '#fff'], [8, C_TARGET], [4.5, '#fff'], [2, C_TARGET]].forEach(([r, col]) => { g.beginPath(); g.arc(c.x, c.y, r * u, 0, 2 * Math.PI); g.fillStyle = col; g.fill(); });
-    g.lineWidth = 1.2 * u; g.strokeStyle = '#111'; g.beginPath(); g.arc(c.x, c.y, 11 * u, 0, 2 * Math.PI); g.stroke(); g.restore(); }
-  // Repères : point + distance à la cible
-  if (sh.reperes) current.reperes.forEach(r => {
-    const c = toC(r); g.save(); g.translate(c.x, c.y); g.rotate(Math.PI / 4);
-    g.fillStyle = C_REP; g.strokeStyle = '#111'; g.lineWidth = 1.4 * u; g.fillRect(-5 * u, -5 * u, 10 * u, 10 * u); g.strokeRect(-5 * u, -5 * u, 10 * u, 10 * u); g.restore();
-    shadowText(`${r.name ? r.name + ' · ' : ''}${Math.round(repDist(r))} m`, c.x + 12 * u, c.y, C_REP, 13);
-  });
+  // ---- Zone de relaxation, PRV, vecteur ----
+  const poly = (pts, stroke, fill, w, dash) => { if (!pts || pts.length < 3) return; g.save(); g.beginPath(); pts.forEach((ll, i) => { const q = toC(ll); i ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y); }); g.closePath();
+    if (fill) { g.fillStyle = fill; g.fill(); } g.strokeStyle = stroke; g.lineWidth = w * u; g.setLineDash(dash ? dash.map(d => d * u) : []); g.stroke(); g.restore(); };
+  if (current.show.relax) poly(relaxPolygon(sol), C_RELAX, 'rgba(0,229,255,.08)', 2.2, [8, 6]);
+  const pv = current.prevVector;
+  if (pv && current.show.prev !== false) { const a = toC(pv.start), b = toC(pv.end); g.save(); g.strokeStyle = '#bbb'; g.lineWidth = 3 * u; g.setLineDash([8 * u, 8 * u]); g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke(); g.restore(); shadowText(`ancien ${fmtWhen(pv.when)}`, b.x + 10 * u, b.y, '#ddd', 11); }
+  current.prvs.forEach(p => { const used = sol.prv && p.id === sol.prv.id; const c = dot(p, used ? C_PRVUSED : C_PRV, used ? 10 : 7); shadowText(used ? 'PRV' : 'prv', c.x + 14 * u, c.y, used ? C_PRVUSED : '#9cf', used ? 14 : 11); });
+  { const a = toC(sol.start), b = toC(sol.end);
+    g.save(); g.lineCap = 'round'; g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 10 * u; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
+    g.strokeStyle = '#000'; g.lineWidth = 5 * u; g.stroke(); g.restore();
+    dot(sol.start, C_START, 10); dot(sol.end, C_END, 10);
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    shadowText(`${hdg(sol.heading - sol.decl)} M · ${fmtInt(sol.length)} m`, mx + 18 * u, my, '#fff', 17); }
 
   // ---- Flèche du nord (coin haut gauche) ----
   const nx = 85 * u, ny = 95 * u, na = pageAngle(0);
@@ -981,37 +1235,53 @@ async function renderPdfCanvas() {
   // ---- Échelle graphique ----
   const by = H - band;
   const tx = (s2, x, y, c, size, bold, align) => { g.save(); g.font = `${bold ? 700 : 500} ${(size || fs) * u}px -apple-system, Helvetica, Arial, sans-serif`; g.fillStyle = c || '#eee'; g.textBaseline = 'middle'; g.textAlign = align || 'left'; g.fillText(s2, x, y); g.restore(); };
-  const mppC = 1 / pxPerM(current.target);
-  const target = W * 0.18 * mppC, nice = [5, 10, 20, 25, 50, 100, 200, 250, 500, 1000].reduce((a, b) => (b <= target ? b : a), 5);
+  const mppC = 1 / pxPerM(sol.start);
+  const target = W * 0.18 * mppC, nice = [50, 100, 200, 250, 500, 1000, 2000, 5000].reduce((a, b) => (b <= target ? b : a), 50);
   const barW = nice / mppC, sx = 30 * u, sy = by - 28 * u;
-  g.save(); g.fillStyle = 'rgba(0,0,0,.55)'; g.fillRect(sx - 10 * u, sy - 16 * u, barW + 90 * u, 32 * u);
+  g.save(); g.fillStyle = 'rgba(0,0,0,.55)'; g.fillRect(sx - 10 * u, sy - 16 * u, barW + 100 * u, 32 * u);
   g.fillStyle = '#fff'; g.fillRect(sx, sy - 4 * u, barW, 8 * u); g.fillStyle = '#111'; g.fillRect(sx + barW / 2, sy - 3 * u, barW / 2 - 1 * u, 6 * u); g.restore();
-  tx(`${nice} m`, sx + barW + 10 * u, sy, '#fff', 12, true);
+  tx(nice >= 1000 ? `${nice / 1000} km` : `${nice} m`, sx + barW + 10 * u, sy, '#fff', 12, true);
 
   // ---- Bandeau d'informations ----
-  g.save(); g.fillStyle = 'rgba(12,12,12,.82)'; g.fillRect(0, by, W, band); g.restore();
-  const p = current.params, r0 = Math.round;
+  g.save(); g.fillStyle = 'rgba(12,12,12,.85)'; g.fillRect(0, by, W, band); g.restore();
+  const p = current.params;
   const col1 = 30 * u, col2 = W * 0.5, l0 = by + lh * 1.1;
   tx(`${current.name}`, col1, l0, '#fff', fs * 1.3, true);
-  tx(`${new Date().toLocaleDateString('fr-FR')} · secteur de finale ${p.sector}°`, col1, l0 + lh * 1.2, '#bbb');
-  if (fg) {
-    tx(`Vent du ${hdg(current.windDir)} (${cardOf(current.windDir)}) · ${fmt1(current.windSpeed)} m/s · finale au ${hdg(finalHeading())}`, col1, l0 + lh * 2.4, C_SECTOR, fs, true);
-    tx(`Prépo ${current.side === 'D' ? 'à droite' : 'à gauche'} : ${r0(fg.cur.d)} m prof. · ${r0(fg.cur.s)} m déport · ${r0(fg.cur.h)} m haut.`, col1, l0 + lh * 3.4, C_PREPO, fs, true);
-  }
+  tx(`Saut du ${fmtWhen(current.when).replace(' ', ' à ')} · ${wxRec ? wxRec.model : ''}`, col1, l0 + lh * 1.2, '#bbb');
+  tx(`Vecteur ${hdg(sol.heading - sol.decl)} M (${hdg(sol.heading)} vrai) · ${fmtInt(sol.length)} m`, col1, l0 + lh * 2.4, '#fff', fs, true);
+  tx(`Largage FL${Math.round(sol.flRel)} = ${fmtInt(sol.hRel)} m sol · ouverture ${fmtInt(p.hOpen)} m sol`, col1, l0 + lh * 3.4, C_END, fs, true);
+  tx(`PRV ${sol.prvAuto ? 'automatique' : 'choisi à la main'} · ${sol.why}${current.reversed ? ' · sens inversé' : ''}`, col1, l0 + lh * 4.4, C_PRVUSED, fs);
   [
-    `Prépo vent nul : ${p.d0} m prof. · ${p.s0} m déport · ${p.h0} m haut.`,
-    `Prépo vent max (${p.vmax} m/s) : ${p.dM} m prof. · ${p.sM} m déport · ${p.hM} m haut.`,
-    (+p.zoneFrac > 0) ? `Zone de prépo : largeur du secteur à ${fmt1(+p.zoneFrac)} de la longueur` : 'Prépo : point',
-    `Chemin jaune : prépos de 0 à ${p.vmax} m/s (chiffres = vent en m/s)`
+    `Vent de largage : ${hdg(sol.windRel.dir)} ${Math.round(sol.windRel.spd * KT)} kt (${fmt1(sol.windRel.spd)} m/s)`,
+    `Chute ${p.vff} m/s · perte à l'ouverture ${p.openLoss} m`,
+    `${p.perpTime} s perpendiculaire · Vz ${fmt1(+p.vz)} m/s · finesse ${fmt1(+p.glide)}`,
+    `Arrivée au PRV à ${p.hMin} m minimum · terrain ${Math.round(sol.elev)} m`,
+    `Déclinaison ${fmt1(sol.decl)}° · vents détaillés en page 2`
   ].forEach((s2, i) => tx(s2, col2, l0 + i * lh, '#eee'));
-  tx(`${BASEMAPS[basemap].attr} · vecteur-largage v${VERSION}`, W - 20 * u, H - 10 * u, '#888', 8, false, 'right');
+  tx(`${BASEMAPS[basemap].attr} · prévision ${wxRec ? wxRec.model : ''} via Open-Meteo · vecteur-largage v${VERSION}`, W - 20 * u, H - 10 * u, '#888', 8, false, 'right');
 
   return { canvas: cv, landscape, fails };
+}
+// Page 2 du PDF : tableau des vents à l'heure du saut
+function pdfWindsPage(doc) {
+  const elev = elevOf(current, wxRec); if (!prof) return;
+  doc.addPage('a4', 'portrait');
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(14);
+  doc.text(`Vents – ${current.name} – ${fmtWhen(current.when).replace(' ', ' à ')}`, 15, 18);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+  doc.text(`${wxRec.model} via Open-Meteo, téléchargée le ${new Date(wxRec.fetched).toLocaleString('fr-FR')} · terrain ${Math.round(elev)} m`, 15, 25);
+  const cols = [['Niveau', 15], ['Hauteur sol (m)', 45], ['Vient du (°)', 85], ['Nœuds', 115], ['m/s', 140], ['°C', 165]];
+  let y = 35; doc.setFont('helvetica', 'bold'); doc.setFontSize(10); cols.forEach(([t, x]) => doc.text(t, x, y)); doc.setFont('helvetica', 'normal');
+  windRows(prof, elev).forEach((r, i) => {
+    y += 6.6; if (y > 285) { doc.addPage('a4', 'portrait'); y = 20; }
+    if (i % 2 === 0) { doc.setFillColor(238, 238, 238); doc.rect(13, y - 4.6, 184, 6.4, 'F'); }
+    [r.lab, fmtInt(r.h).replace(/[\u202f\u00a0]/g, ' '), hdg(r.dir), String(Math.round(r.spd * KT)), fmt1(r.spd), r.T == null ? '–' : String(Math.round(r.T))].forEach((t, k) => doc.text(t, cols[k][1], y));
+  });
 }
 
 let pdfFile = null;
 $('btnPdf').addEventListener('click', async () => {
-  if (!hasTarget() || !hasWind()) return toast('Place d\'abord la cible et règle le vent');
+  compute(); if (!sol || !sol.ok) return toast(sol && sol.err ? sol.err : 'Pas encore de vecteur');
   const b = $('btnPdf'); b.disabled = true; const old = b.textContent; b.textContent = 'Préparation du PDF…';
   try {
     await loadJsPdf();
@@ -1019,6 +1289,7 @@ $('btnPdf').addEventListener('click', async () => {
     const doc = new window.jspdf.jsPDF({ orientation: landscape ? 'landscape' : 'portrait', unit: 'mm', format: 'a4' });
     const wmm = landscape ? 297 : 210, hmm = landscape ? 210 : 297;
     doc.addImage(canvas.toDataURL('image/jpeg', 0.88), 'JPEG', 0, 0, wmm, hmm);
+    pdfWindsPage(doc);
     const name = `${dateStamp()}_Vecteur_Largage_${safeName(current.name)}.pdf`;
     pdfFile = new File([doc.output('blob')], name, { type: 'application/pdf' });
     $('pdfName').textContent = name + (fails ? ` (${fails} morceaux de photo manquants)` : '');
@@ -1039,7 +1310,7 @@ $('pdfShare').addEventListener('click', async () => {
 
 
 // ---------- Sauvegarde ----------
-// Exporter : fichier .json (zones + manœuvre) proposé à la feuille de partage (Fichiers, AirDrop, mail…).
+// Exporter : fichier .json (zones + paramètres) proposé à la feuille de partage (Fichiers, AirDrop, mail…).
 $('btnExport').addEventListener('click', async () => {
   persist();
   const data = JSON.stringify({ app: 'vecteur-largage', v: 3, exported: new Date().toISOString(), profile, zones }, null, 1);
@@ -1074,10 +1345,10 @@ $('importFile').addEventListener('change', async e => {
     toast(`Import : ${added} zone(s) ajoutée(s)${updated ? `, ${updated} mise(s) à jour` : ''}`);
   } catch (er) { toast('Fichier illisible'); }
 });
-// Tout effacer (zones, manœuvre, zone en cours) — les photos gardées hors-ligne restent.
+// Tout effacer (zones, paramètres, zone en cours, prévisions) — les photos gardées hors-ligne restent.
 $('btnWipe').addEventListener('click', async () => {
-  if (!(await ask('Effacer TOUTES les données (zones enregistrées, manœuvre, zone en cours) ? C\'est définitif. Pense à exporter avant si besoin.'))) return;
-  ['vl.zones', 'vl.current', 'vl.profile', 'vl.lastParams'].forEach(k => { try { localStorage.removeItem(k); } catch (er) {} });
+  if (!(await ask('Effacer TOUTES les données (zones enregistrées, paramètres, zone en cours, prévisions) ? C\'est définitif. Pense à exporter avant si besoin.'))) return;
+  Object.keys(localStorage).filter(k => k.startsWith('vl.')).forEach(k => { try { localStorage.removeItem(k); } catch (er) {} });
   if ((typeof Photo !== 'undefined')) await Photo.clearAll();
   location.reload();
 });
@@ -1088,9 +1359,11 @@ function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<':
 $('ver').textContent = VERSION;
 syncCompass();
 fillInputs();
-if (hasTarget()) fitFigure();
 redraw();
-if (!current.target && !current.id && current.zoom < 10) locate(true); else locate(false);
+if (!current.prvs.length && !current.id && current.zoom < 10) locate(true); else locate(false);
+if (current.id) askOldVector().then(() => { compute(); if (sol && sol.ok) fitFigure(); fillInputs(); ensureWx(false); });
+window.addEventListener('online', () => { if (current.id) ensureWx(false); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && current.id) ensureWx(false); });
 // Mise à jour automatique : vérifie une nouvelle version à chaque retour sur l'appli et recharge dès qu'elle est installée
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
   const hadController = !!navigator.serviceWorker.controller;

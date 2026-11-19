@@ -114,3 +114,35 @@ button.danger{border-color:#a33;color:#ff8a8a}
 #calImg{display:block;width:100%;height:auto}
 .calmark{position:absolute;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;border:3px solid #ff2020;color:#fff;font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.4);pointer-events:none}
 .calbtns{display:flex;gap:8px;margin-top:8px}.calbtns button{flex:1;padding:12px}
+/* ---------- vecteur-largage ---------- */
+.prv{-webkit-touch-callout:none;user-select:none}
+.prv span{position:absolute;left:6px;top:6px;width:18px;height:18px;border-radius:50%;background:#2f80ff;border:3px solid #fff;box-shadow:0 0 0 1.5px #111}
+.prv.used span{left:1px;top:1px;width:28px;height:28px;background:#ffd400;border-color:#111;box-shadow:0 0 0 2px #fff,0 0 10px 2px rgba(255,212,0,.8)}
+.prv.used span::after{content:'PRV';position:absolute;left:34px;top:50%;transform:translateY(-50%);font-weight:800;font-size:13px;color:#ffd400;text-shadow:0 0 3px #000,0 0 3px #000}
+.vlabel{-webkit-touch-callout:none;user-select:none}
+.vlabel span{position:absolute;transform:translate(-50%,-50%);white-space:nowrap;background:rgba(0,0,0,.82);color:#fff;font-weight:800;font-size:15px;padding:5px 10px;border-radius:9px;border:2px solid #fff}
+.vlabel .vcap{color:#ffd400}
+.plabel span{position:absolute;transform:translate(8px,-50%);white-space:nowrap;color:#ddd;font-size:11px;text-shadow:0 0 3px #000,0 0 3px #000}
+#quick #qWhen,#quick #qRel{color:#fff;height:auto;min-height:38px;line-height:1.15;padding:3px 7px;font-size:12px;border-color:#1ec83c}
+#quick #qWinds{border-color:#2f80ff;font-size:17px}#quick #qWinds.on{background:#2f80ff;color:#fff}
+#quick #qRelax{border-color:#00e5ff}#quick #qRelax:not(.on){opacity:.55;text-decoration:line-through}
+#quick #qRev.on{background:#ff8c00;color:#111;border-color:#ff8c00}
+#quick #qPrv{border-color:#ffd400}#quick #qPrv.on{background:#ffd400;color:#111}
+#quick #qVecAuto{border-color:#fff;color:#fff}
+#jumpBox,#windsBox{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(60px + env(safe-area-inset-bottom));width:min(94vw,440px);background:rgba(18,18,18,.96);border:2px solid #1ec83c;border-radius:14px;padding:10px 12px;z-index:1050;max-height:calc(100% - 140px - env(safe-area-inset-top));overflow:auto}
+#windsBox{border-color:#2f80ff;top:calc(70px + env(safe-area-inset-top));bottom:calc(50px + env(safe-area-inset-bottom));max-height:none;display:flex;flex-direction:column}
+.when{display:flex;gap:6px;align-items:center;margin-bottom:8px}
+.when input[type=date]{flex:1;min-width:0}
+.when .hr{min-width:52px;text-align:center;font-weight:800;font-size:16px}
+.when button{min-width:46px}
+.jrow{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:6px}
+.jrow label{font-size:12px;color:#aaa;display:block;margin-bottom:2px}
+.warn{color:#ffd400}
+#windsBox .tw{overflow:auto;flex:1;margin:6px 0}
+#windsTable{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
+#windsTable th{position:sticky;top:0;background:#222;color:#aaa;font-size:11px;font-weight:600;padding:5px 4px;text-align:right}
+#windsTable td{padding:4px;text-align:right;border-bottom:1px solid #2a2a2a}
+#windsTable td:first-child,#windsTable th:first-child{text-align:left;color:#9cf}
+#windsTable td:nth-child(3),#windsTable td:nth-child(4){font-weight:700;color:#fff}
+.dim{opacity:.5}
+h4{margin:12px 0 4px;font-size:13px;color:#aaa;text-transform:uppercase;letter-spacing:.04em}
