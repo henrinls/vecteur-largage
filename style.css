@@ -184,3 +184,6 @@ button,input,select,label,a{touch-action:manipulation}
 /* Cercles NM autour de la DZ */
 #quick #qNm{border-color:#fff;color:#fff}#quick #qNm:not(.on){opacity:.55;text-decoration:line-through}
 .nmlbl span{position:absolute;transform:translate(-50%,-50%);white-space:nowrap;font-size:11px;font-weight:700;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000,0 0 2px #000}
+
+/* Deux boutons côte à côte : même hauteur, même si l'un a son texte sur deux lignes (ex. Fermer / Partager-Enregistrer) */
+.grid2>button{align-self:stretch}
