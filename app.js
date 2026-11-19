@@ -4,7 +4,7 @@ window.addEventListener('error', e => {
   const t = document.getElementById('toast');
   if (t) { t.textContent = 'Erreur : ' + (e.message || 'inconnue') + ' — ferme et rouvre l\'appli'; t.classList.remove('hidden'); }
 });
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -461,8 +461,8 @@ function draw(light) {
     if (current.show.relax) {
       const key = [current.when, sol.heading, sol.prv.id, JSON.stringify(current.params), sol.elev, wxRec && wxRec.fetched].join('|');
       if (!light && key !== relaxKey) { relaxPts = relaxPolygon(sol); patPts = patatoidPolygon(sol); relaxKey = key; }
-      if (relaxPts) L.polygon(relaxPts.map(LL), { color: C_RELAX, weight: 2.5, fillColor: C_RELAX, fillOpacity: .08, smoothFactor: 0, interactive: false }).addTo(fig);
-      if (patPts) L.polygon(patPts.map(LL), { color: C_RELAX, weight: 2, dashArray: '6 5', fill: false, smoothFactor: 0, interactive: false }).addTo(fig);
+      if (relaxPts) L.polygon(relaxPts.map(LL), { color: C_RELAX, weight: 1.75, fillColor: C_RELAX, fillOpacity: .08, smoothFactor: 0, interactive: false }).addTo(fig);
+      if (patPts) L.polygon(patPts.map(LL), { color: C_RELAX, weight: 1.5, dashArray: '6 5', fill: false, smoothFactor: 0, interactive: false }).addTo(fig);
     }
     if (current.show.rose) { const ro = roseOf(sol); degRing(ro.c, ro.R, '#ffffff', sol.decl); }
     const a = LL(sol.start), b = LL(sol.end);
@@ -885,8 +885,8 @@ function updateMeasure() {
   const a = meas.a, b = meas.b, d = map.distance(LL(a), LL(b)), c = capDeg(a, b), mid = [(a.lat + b.lat) / 2, (a.lng + b.lng) / 2];
   const txt = `${hdg(c)} · ${fmtDist(d)}`;
   if (!meas.line) {
-    meas.halo = L.polyline([LL(a), LL(b)], { color: '#000', weight: 5, opacity: .5, interactive: false }).addTo(measLayer);
-    meas.line = L.polyline([LL(a), LL(b)], { color: '#00e5ff', weight: 3, dashArray: '8 6', interactive: false }).addTo(measLayer);
+    meas.halo = L.polyline([LL(a), LL(b)], { color: '#000', weight: 3.5, opacity: .5, interactive: false }).addTo(measLayer);
+    meas.line = L.polyline([LL(a), LL(b)], { color: '#00e5ff', weight: 2, dashArray: '8 6', interactive: false }).addTo(measLayer);
     meas.lbl = L.marker(mid, { interactive: false, icon: L.divIcon({ className: 'measlbl', iconSize: [0, 0], html: `<span>${txt}</span>` }) }).addTo(measLayer);
   } else {
     meas.halo.setLatLngs([LL(a), LL(b)]); meas.line.setLatLngs([LL(a), LL(b)]); meas.lbl.setLatLng(mid);
@@ -1151,7 +1151,7 @@ function locate(center) {
   navigator.geolocation.getCurrentPosition(pos => {
     const ll = [pos.coords.latitude, pos.coords.longitude];
     if (posMarker) posMarker.setLatLng(ll);
-    else posMarker = L.circleMarker(ll, { radius: 7, color: '#fff', weight: 2, fillColor: '#2f80ff', fillOpacity: 1 }).addTo(map);
+    else posMarker = L.circleMarker(ll, { radius: 6, color: '#fff', weight: 1.5, fillColor: '#2f80ff', fillOpacity: 1 }).addTo(map);
     if (center) map.setView(ll, Math.max(map.getZoom(), 17));
   }, () => { if (center) toast('Position refusée ou indisponible'); }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
 }
