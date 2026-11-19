@@ -4,7 +4,7 @@ window.addEventListener('error', e => {
   const t = document.getElementById('toast');
   if (t) { t.textContent = 'Erreur : ' + (e.message || 'inconnue') + ' — ferme et rouvre l\'appli'; t.classList.remove('hidden'); }
 });
-const VERSION = '0.7.1';
+const VERSION = '0.8.0';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -16,7 +16,7 @@ const TILE_CACHE = 'vl-tiles-v1';
 const DEFAULT_PARAMS = {
   vff: 50, openLoss: 100, perpTime: 15, vz: 4, glide: 2.5, hMin: 300, margin: 20, sep: 300,   // hypothèses (margin : marge de sécurité en % ; sep : séparation mini entre sorties, m)
   acMs: 36.0, acType: 'pc6',                                             // avion et vitesse de largage, badin (m/s ; 70 kt : Pilatus PC-6)
-  hOpen: 1500, relMode: 'FL', relFL: 140, relAGL: 4000                   // utilisation
+  hOpen: 1000, relMode: 'FL', relFL: 140, relAGL: 4000                   // utilisation
 };
 const PROFILE_KEYS = ['vff', 'openLoss', 'perpTime', 'vz', 'glide', 'hMin', 'margin', 'sep', 'acMs', 'acType', 'hOpen', 'relMode', 'relFL', 'relAGL'];
 const C_START = '#1ec83c', C_END = '#ff2020', C_PRV = '#ffd400', C_PRVUSED = '#ff8c00', C_RELAX = '#00e5ff';
@@ -157,6 +157,7 @@ if (current.target || current.gateA) current = newZone(null);
 let profile = store.get('vl.profile', null) || {};
 PROFILE_KEYS.forEach(k => { if (profile[k] === undefined) profile[k] = DEFAULT_PARAMS[k]; });
 if (profile.acMs === 41.2) profile.acMs = DEFAULT_PARAMS.acMs; // ancien défaut 80 kt → 70 kt (v0.4.5)
+if (!store.get('vl.mig.hOpen', false)) { if (+profile.hOpen === 1500) profile.hOpen = 1000; store.set('vl.mig.hOpen', true); } // ancien défaut 1 500 m → 1 000 m (v0.8.0), une seule fois
 Object.keys(profile).forEach(k => { if (!PROFILE_KEYS.includes(k)) delete profile[k]; });
 store.set('vl.profile', profile);
 function applyProfile(z) { if (z && z.params) PROFILE_KEYS.forEach(k => { z.params[k] = profile[k]; }); }
@@ -180,7 +181,11 @@ function persist() {
 }
 
 const n360 = h => ((h % 360) + 360) % 360;
-const hdg = h => String(Math.round(n360(h)) % 360).padStart(3, '0') + '°';
+// Tous les caps affichés sont magnétiques (cap vrai − déclinaison de la zone) ; la géométrie et les vents téléchargés restent en vrai
+let _dz = { k: null, v: 0 };
+function declCur() { if (!current) return 0; const c = current.prvs && current.prvs.length ? prvCentroid(current) : current.center; if (!c) return 0; const k = c.lat.toFixed(2) + ',' + c.lng.toFixed(2) + ',' + current.prvs.length; if (_dz.k !== k) _dz = { k, v: declAt(current) }; return _dz.v; }
+const hdgN = h => String(Math.round(n360(h - declCur())) % 360).padStart(3, '0') + '°'; // magnétique, sans suffixe (tableaux)
+const hdg = h => hdgN(h) + ' M';
 function cardOf(h) { h = n360(h); if (h >= 315 || h <= 45) return 'N'; if (h >= 135 && h <= 225) return 'S'; return h < 180 ? 'E' : 'O'; }
 const fmt1 = v => (Math.round(v * 10) / 10).toString().replace('.', ',');
 const fmtInt = v => Math.round(v).toLocaleString('fr-FR');
@@ -578,7 +583,7 @@ function placeMarkers() {
     const mid = labelPos();
     const ne = sol.exits ? sol.exits.n : 1;
     const dtx = sol.exits && sol.exits.dt ? ` · <b class="vexits">${fmt1(sol.exits.dt)} s</b>` : '';
-    const html = `<span><b class="vcap">${hdg(sol.heading - sol.decl)} M</b> · ${fmtInt(sol.length)} m · <b class="vexits">${ne} sortie${ne > 1 ? 's' : ''}</b>${dtx}</span>`;
+    const html = `<span><b class="vcap">${hdg(sol.heading)}</b> · ${fmtInt(sol.length)} m · <b class="vexits">${ne} sortie${ne > 1 ? 's' : ''}</b>${dtx}</span>`;
     if (!vecLabel) { vecLabel = L.marker(LL(mid), { zIndexOffset: 1200, icon: L.divIcon({ className: 'vlabel', iconSize: [0, 0], html }) }).addTo(map); vecLabel._html = html; longPressAction(vecLabel, editHeading); }
     else { vecLabel.setLatLng(LL(mid)); if (vecLabel._html !== html) { vecLabel.setIcon(L.divIcon({ className: 'vlabel', iconSize: [0, 0], html })); vecLabel._html = html; longPressAction(vecLabel, editHeading); } }
     if (current.show.label === false) { if (map.hasLayer(vecLabel)) map.removeLayer(vecLabel); }
@@ -674,7 +679,7 @@ function fitFigure() {
 function updateInfo() {
   let t = '';
   if (sol && sol.ok) {
-    t = `Vecteur ${hdg(sol.heading - sol.decl)} M (${hdg(sol.heading)} vrai, déclinaison ${fmt1(sol.decl)}°) · ${fmtInt(sol.length)} m · ${sol.why}` +
+    t = `Vecteur ${hdg(sol.heading)} (déclinaison ${fmt1(sol.decl)}°) · ${fmtInt(sol.length)} m · ${sol.why}` +
       ` · largage FL${Math.round(sol.flRel)} = ${fmtInt(sol.hRel)} m sol · vent de largage ${hdg(sol.windRel.dir)} ${Math.round(sol.windRel.spd * KT)} kt` +
       ` · PRV ${sol.prvAuto ? 'automatique (le plus au vent)' : 'choisi à la main'}` +
       ` · dérive en chute libre ${fmtDist(Math.hypot(sol.dFF.x, sol.dFF.y))} · vent moyen sous voile ${hdg(sol.canopyWind.dir)} ${Math.round(sol.canopyWind.spd * KT)} kt pour une vitesse sous voile de ${Math.round(sol.Va * KT)} kt` +
@@ -817,7 +822,7 @@ function renderWinds() {
   if (!pr) { tb.innerHTML = '<tr><td colspan="6" class="mut">Pas de donnée pour cette heure.</td></tr>'; return; }
   windRows(pr, elev).forEach(r => {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${r.lab}</td><td>${fmtInt(r.h)}</td><td>${hdg(r.dir)}</td><td>${Math.round(r.spd * KT)}</td><td>${fmt1(r.spd)}</td><td>${r.T == null ? '–' : Math.round(r.T)}</td>`;
+    tr.innerHTML = `<td>${r.lab}</td><td>${fmtInt(r.h)}</td><td>${hdgN(r.dir)}</td><td>${Math.round(r.spd * KT)}</td><td>${fmt1(r.spd)}</td><td>${r.T == null ? '–' : Math.round(r.T)}</td>`;
     tb.append(tr);
   });
 }
@@ -885,9 +890,8 @@ function measMarker(key) {
 function updateMeasure() {
   if (!meas.a || !meas.b) return;
   const a = meas.a, b = meas.b, d = map.distance(LL(a), LL(b)), mid = [(a.lat + b.lat) / 2, (a.lng + b.lng) / 2];
-  let dec = 0; try { dec = magDeclination(mid[0], mid[1], new Date()); } catch (e) {}
-  const c = capDeg(a, b) - dec; // cap magnétique (vrai − déclinaison)
-  const txt = `${hdg(c)} M · ${fmtDist(d)}`;
+  const c = capDeg(a, b); // cap vrai, affiché en magnétique par hdg
+  const txt = `${hdg(c)} · ${fmtDist(d)}`;
   if (!meas.line) {
     meas.halo = L.polyline([LL(a), LL(b)], { color: '#000', weight: 3.5, opacity: .5, interactive: false }).addTo(measLayer);
     meas.line = L.polyline([LL(a), LL(b)], { color: '#00e5ff', weight: 2, dashArray: '8 6', interactive: false }).addTo(measLayer);
@@ -896,7 +900,7 @@ function updateMeasure() {
     meas.halo.setLatLngs([LL(a), LL(b)]); meas.line.setLatLngs([LL(a), LL(b)]); meas.lbl.setLatLng(mid);
     const el = meas.lbl.getElement && meas.lbl.getElement(); if (el) el.querySelector('span').textContent = txt;
   }
-  measBox(`<b>Cap ${hdg(c)} magnétique · ${fmtDist(d)}</b><br><small>Appui long sur un point puis glisse pour ajuster · 📏 = effacer</small>`);
+  measBox(`<b>Cap ${hdg(c)} · ${fmtDist(d)}</b><br><small>Appui long sur un point puis glisse pour ajuster · 📏 = effacer</small>`);
 }
 function measureClick(p) {
   if (!meas.a) { meas.a = p; meas.ma = measMarker('a'); measBox('Mesure : touche le <b>2e point</b>'); return; }
@@ -1168,7 +1172,7 @@ $('btnNorth').addEventListener('click', () => setMapBearing(0, 'Nord en haut'));
 // Bouton « Axe » : l'axe de largage (sens de vol) vers le haut
 $('btnAxisUp').addEventListener('click', () => {
   if (!sol || !sol.ok) return toast('Pas encore de vecteur');
-  setMapBearing(normB(-sol.heading), `Axe de largage (${hdg(sol.heading - sol.decl)} M) vers le haut`);
+  setMapBearing(normB(-sol.heading), `Axe de largage (${hdg(sol.heading)}) vers le haut`);
 });
 $('btnFit').addEventListener('click', () => { if (figurePoints().length) fitFigure(); else toast('Place d\'abord un point de rendez-vous'); });
 
@@ -1389,7 +1393,7 @@ async function renderPdfCanvas() {
   tx(`${current.name}`, col1, l0, '#fff', fs * 1.3, true);
   tx(`Saut du ${fmtWhen(current.when).replace(' ', ' à ')} · ${wxRec ? wxRec.model : ''}`, col1, l0 + lh * 1.2, '#bbb');
   const exP = sol.exits || { n: 1 };
-  tx(`Vecteur ${hdg(sol.heading - sol.decl)} M (${hdg(sol.heading)} vrai) · ${fmtInt(sol.length)} m`, col1, l0 + lh * 2.4, '#fff', fs, true);
+  tx(`Vecteur ${hdg(sol.heading)} · ${fmtInt(sol.length)} m`, col1, l0 + lh * 2.4, '#fff', fs, true);
   tx(`${exP.n} sortie${exP.n > 1 ? 's' : ''}${exP.dt ? ` · une toutes les ${fmt1(exP.dt)} s (${fmtInt(exP.s)} m au sol, séparation ${exP.sep} m)` : ''}`, col1, l0 + lh * 3.4, C_PRVUSED, fs, true);
   tx(`Largage FL${Math.round(sol.flRel)} = ${fmtInt(sol.hRel)} m sol · ouverture ${fmtInt(p.hOpen)} m sol`, col1, l0 + lh * 4.4, C_END, fs, true);
   tx(`PRV ${sol.prvAuto ? 'automatique' : 'choisi à la main'} · ${sol.why}${current.reversed ? ' · sens inversé' : ''}`, col1, l0 + lh * 5.4, '#ffd400', fs);
@@ -1412,12 +1416,12 @@ function pdfWindsPage(doc) {
   doc.text(`Vents – ${current.name} – ${fmtWhen(current.when).replace(' ', ' à ')}`, 15, 18);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
   doc.text(`${wxRec.model} via Open-Meteo, téléchargée le ${new Date(wxRec.fetched).toLocaleString('fr-FR')} · terrain ${Math.round(elev)} m`, 15, 25);
-  const cols = [['Niveau', 15], ['Hauteur sol (m)', 45], ['Vient du (°)', 85], ['Nœuds', 115], ['m/s', 140], ['°C', 165]];
+  const cols = [['Niveau', 15], ['Hauteur sol (m)', 45], ['Vient du (° M)', 85], ['Nœuds', 115], ['m/s', 140], ['°C', 165]];
   let y = 35; doc.setFont('helvetica', 'bold'); doc.setFontSize(10); cols.forEach(([t, x]) => doc.text(t, x, y)); doc.setFont('helvetica', 'normal');
   windRows(prof, elev).forEach((r, i) => {
     y += 6.6; if (y > 285) { doc.addPage('a4', 'portrait'); y = 20; }
     if (i % 2 === 0) { doc.setFillColor(238, 238, 238); doc.rect(13, y - 4.6, 184, 6.4, 'F'); }
-    [r.lab, fmtInt(r.h).replace(/[\u202f\u00a0]/g, ' '), hdg(r.dir), String(Math.round(r.spd * KT)), fmt1(r.spd), r.T == null ? '–' : String(Math.round(r.T))].forEach((t, k) => doc.text(t, cols[k][1], y));
+    [r.lab, fmtInt(r.h).replace(/[\u202f\u00a0]/g, ' '), hdgN(r.dir), String(Math.round(r.spd * KT)), fmt1(r.spd), r.T == null ? '–' : String(Math.round(r.T))].forEach((t, k) => doc.text(t, cols[k][1], y));
   });
 }
 
