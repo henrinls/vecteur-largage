@@ -4,7 +4,7 @@ window.addEventListener('error', e => {
   const t = document.getElementById('toast');
   if (t) { t.textContent = 'Erreur : ' + (e.message || 'inconnue') + ' — ferme et rouvre l\'appli'; t.classList.remove('hidden'); }
 });
-const VERSION = '0.2.2';
+const VERSION = '0.2.3';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -18,7 +18,7 @@ const DEFAULT_PARAMS = {
   hOpen: 1500, relMode: 'FL', relFL: 140, relAGL: 4000                   // utilisation
 };
 const PROFILE_KEYS = ['vff', 'openLoss', 'perpTime', 'vz', 'glide', 'hMin', 'hOpen', 'relMode', 'relFL', 'relAGL'];
-const C_START = '#1ec83c', C_END = '#ff2020', C_PRV = '#2f80ff', C_PRVUSED = '#ffd400', C_RELAX = '#00e5ff';
+const C_START = '#1ec83c', C_END = '#ff2020', C_PRV = '#ffd400', C_PRVUSED = '#ff8c00', C_RELAX = '#00e5ff';
 const isDark = c => c === '#000000';
 const KT = 1.943844; // m/s → nœuds
 
@@ -477,7 +477,7 @@ function longPressDrag(marker, onMove, onEnd, onStart) {
 }
 // ---------- PRV, vecteur et son étiquette ----------
 function prvIcon(used) {
-  return L.divIcon({ className: 'prv' + (used ? ' used' : ''), iconSize: [30, 30], iconAnchor: [15, 15], html: '<span></span>' });
+  return L.divIcon({ className: 'prv' + (used ? ' used' : ''), iconSize: [36, 36], iconAnchor: [18, 18], html: '<span></span>' });
 }
 // Appui long sans glisser → action (ex. menu d'un PRV)
 function longPressAction(m, cb) {
@@ -1245,7 +1245,7 @@ async function renderPdfCanvas() {
   if (current.show.relax) { poly(relaxPolygon(sol), C_RELAX, 'rgba(0,229,255,.08)', 2.6); poly(patatoidPolygon(sol), C_RELAX, null, 2.2, [8, 6]); }
   const pv = current.prevVector;
   if (pv && current.show.prev !== false) { const a = toC(pv.start), b = toC(pv.end); g.save(); g.strokeStyle = '#bbb'; g.lineWidth = 3 * u; g.setLineDash([8 * u, 8 * u]); g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke(); g.restore(); shadowText(`ancien ${fmtWhen(pv.when)}`, b.x + 10 * u, b.y, '#ddd', 11); }
-  current.prvs.forEach(p => { const used = sol.prv && p.id === sol.prv.id; const c = dot(p, used ? C_PRVUSED : C_PRV, used ? 10 : 7); shadowText(used ? 'PRV' : 'prv', c.x + 14 * u, c.y, used ? C_PRVUSED : '#9cf', used ? 14 : 11); });
+  current.prvs.forEach(p => { const used = sol.prv && p.id === sol.prv.id; const c = dot(p, used ? C_PRVUSED : C_PRV, used ? 12 : 7); shadowText(used ? 'PRV' : 'prv', c.x + (used ? 18 : 14) * u, c.y, used ? C_PRVUSED : C_PRV, used ? 15 : 11); });
   { const a = toC(sol.start), b = toC(sol.end);
     g.save(); g.lineCap = 'round'; g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 10 * u; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
     g.strokeStyle = '#000'; g.lineWidth = 5 * u; g.stroke(); g.restore();
