@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.8.5';
+const VERSION = '0.8.6';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -262,13 +262,13 @@ function projection(Vair, vff) {
 // Nombre de sorties sur le vecteur : intervalle de temps minimal entre deux sorties pour que deux paras successifs
 // restent à « sep » m au moins l'un de l'autre pendant toute la chute (jusqu'à l'ouverture du premier), puis combien en tiennent sur la longueur.
 function exitsOn(sol, prof, p, proj) {
-  const vff = +p.vff, Tff = proj.fallTime(sol.hRel - sol.h1), sep = +p.sep || 300, dt = 0.5, u = sol.u;
+  const vff = +p.vff, Tff = proj.fallTime(sol.hRel - sol.hOpen), sep = +p.sep || 300, dt = 0.5, u = sol.u;
   const wr = windAt(prof, sol.hRel), Vg = sol.tas + wr.u * u.x + wr.v * u.y; // vitesse sol de l'avion le long de l'axe (vitesse vraie + vent)
   if (!(Vg > 3)) return { n: 1, dt: null, s: null, Vg };
   const F = []; let Dx = 0, Dy = 0;                                               // position d'un para t secondes après sa sortie
   for (let t = 0; t <= Tff + 60; t += dt) {
     const pr = proj.at(t); F.push({ x: pr * u.x + Dx, y: pr * u.y + Dy });
-    const w = windAt(prof, Math.max(sol.h1, sol.hRel - proj.zAt(t + dt / 2))); Dx += w.u * dt; Dy += w.v * dt;
+    const w = windAt(prof, Math.max(sol.hOpen, sol.hRel - proj.zAt(t + dt / 2))); Dx += w.u * dt; Dy += w.v * dt;
   }
   for (let D = 1; D <= 60; D += 0.25) {
     const dk = D / dt, tMax = Math.max(0, Tff - D); let ok = true;
@@ -301,8 +301,13 @@ function solve(z, prof, rec) {
   const rho = pRel * 100 / (287.05 * TK), tas = (+p.acMs || 0) * Math.sqrt(1.225 / rho);
   out.tas = tas;
   const proj = projection(tas, +p.vff);
-  const dW = driftFF(prof, hRel, h1, proj), dFF = { x: dW.x + proj.total * u.x, y: dW.y + proj.total * u.y };
-  out.throwDist = proj.total; out.dW = dW; out.h1 = h1; out.Tff = dW.T; out.z10 = proj.zAt(10);
+  // Chute libre jusqu'à la hauteur d'ouverture, puis ouverture : freinage régulier de vff à vz sur la perte à l'ouverture (Henri : ~50 → 4 m/s sur 100 m)
+  const dF = driftFF(prof, hRel, hOpen, proj), tOpen = h1 < hOpen ? 2 * (hOpen - h1) / ((+p.vff) + (+p.vz)) : 0;
+  let oX = 0, oY = 0; for (let t = 0; t < tOpen; t += 0.25) { const d = Math.min(0.25, tOpen - t), f = (t + d / 2) / tOpen, v0 = +p.vff, v1 = +p.vz;
+    const hh = hOpen - (v0 * (t + d / 2) - (v0 - v1) * (t + d / 2) * f / 2), w = windAt(prof, Math.max(h1, hh)); oX += w.u * d; oY += w.v * d; }
+  const dW = { x: dF.x + oX, y: dF.y + oY, T: dF.T };
+  const dFF = { x: dW.x + proj.total * u.x, y: dW.y + proj.total * u.y };
+  out.throwDist = proj.total; out.dW = dW; out.h1 = h1; out.hOpen = hOpen; out.Tff = dF.T; out.tOpen = tOpen; out.z10 = proj.zAt(10);
   const dP = driftBetween(prof, h1, h2, +p.vz), lat = Va * (+p.perpTime);
   const S = [1, -1].map(s => ({ x: dFF.x + dP.x + s * lat * r.x, y: dFF.y + dP.y + s * lat * r.y }));
   // Portée vers le PRV selon la direction suivie (route directe, dérive corrigée en crabe), du bas de la phase 2 à hMin
@@ -710,7 +715,7 @@ function updateInfo() {
   $('axisInfo').textContent = t;
   const ex = sol && sol.ok && sol.exits;
   $('whyInfo').innerHTML = sol && sol.ok ? (ex && ex.dt ? `<b>${ex.n} sortie${ex.n > 1 ? 's' : ''}</b> : une toutes les <b>${fmt1(ex.dt)} s</b> (${fmtInt(ex.s)} m au sol, vitesse sol de l'avion ${Math.round(ex.Vg * KT)} kt) pour rester à ${ex.sep} m les uns des autres. ` : '') +
-    `${acName()} : ${Math.round(sol.tas * KT)} kt de vitesse vraie à FL${Math.round(sol.flRel)} (${Math.round(current.params.acMs * KT)} kt badin). Chute libre de ${Math.round(sol.Tff)} s (${Math.round(sol.z10)} m les 10 premières secondes, le temps d'accélérer) : projection ${fmtInt(sol.throwDist)} m + dérive, au total <b>${fmtDist(Math.hypot(sol.dFF.x, sol.dFF.y))}</b> vers le ${hdg(n360(Math.atan2(sol.dFF.x, sol.dFF.y) * 180 / Math.PI))}. ` +
+    `${acName()} : ${Math.round(sol.tas * KT)} kt de vitesse vraie à FL${Math.round(sol.flRel)} (${Math.round(current.params.acMs * KT)} kt badin). Chute libre de ${Math.round(sol.Tff)} s jusqu'à ${fmtInt(sol.hOpen)} m sol (${Math.round(sol.z10)} m les 10 premières secondes, le temps d'accélérer), puis ouverture en ${fmt1(sol.tOpen)} s (freinage de ${current.params.vff} à ${current.params.vz} m/s sur ${current.params.openLoss} m) : projection ${fmtInt(sol.throwDist)} m + dérive, au total <b>${fmtDist(Math.hypot(sol.dFF.x, sol.dFF.y))}</b> vers le ${hdg(n360(Math.atan2(sol.dFF.x, sol.dFF.y) * 180 / Math.PI))}. ` +
     `Sous voile : vent moyen <b>${Math.round(sol.canopyWind.spd * KT)} kt</b> pour ${Math.round(sol.Va * KT)} kt de vitesse propre` +
     (sol.canopyWind.spd >= sol.Va ? ' <b class="warn">→ tu ne remontes pas au vent : il faut ouvrir au vent du PRV.</b>' : '.') : '';
   $('elevAuto').textContent = typeof current.elevAuto === 'number' ? `automatique : ${current.elevAuto} m` : 'automatique : inconnue (pas encore de prévision)';
