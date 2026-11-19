@@ -4,7 +4,7 @@ window.addEventListener('error', e => {
   const t = document.getElementById('toast');
   if (t) { t.textContent = 'Erreur : ' + (e.message || 'inconnue') + ' — ferme et rouvre l\'appli'; t.classList.remove('hidden'); }
 });
-const VERSION = '0.2.6';
+const VERSION = '0.3.0';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -14,10 +14,11 @@ const BASEMAPS = {
 const TILE_CACHE = 'vl-tiles-v1';
 // Paramètres : les « hypothèses » (valeurs arbitraires, réglables) et les réglages d'utilisation (à chaque saut)
 const DEFAULT_PARAMS = {
-  vff: 50, openLoss: 100, perpTime: 15, vz: 4, glide: 2.5, hMin: 300, margin: 20,   // hypothèses (margin : marge de sécurité en %)
+  vff: 50, openLoss: 100, perpTime: 15, vz: 4, glide: 2.5, hMin: 300, margin: 20, sep: 300,   // hypothèses (margin : marge de sécurité en % ; sep : séparation mini entre sorties, m)
+  acMs: 41.2,                                                            // vitesse de largage de l'avion (m/s, 80 kt)
   hOpen: 1500, relMode: 'FL', relFL: 140, relAGL: 4000                   // utilisation
 };
-const PROFILE_KEYS = ['vff', 'openLoss', 'perpTime', 'vz', 'glide', 'hMin', 'margin', 'hOpen', 'relMode', 'relFL', 'relAGL'];
+const PROFILE_KEYS = ['vff', 'openLoss', 'perpTime', 'vz', 'glide', 'hMin', 'margin', 'sep', 'acMs', 'hOpen', 'relMode', 'relFL', 'relAGL'];
 const C_START = '#1ec83c', C_END = '#ff2020', C_PRV = '#ffd400', C_PRVUSED = '#ff8c00', C_RELAX = '#00e5ff';
 const isDark = c => c === '#000000';
 const KT = 1.943844; // m/s → nœuds
@@ -128,7 +129,7 @@ const store = {
   del(k) { try { localStorage.removeItem(k); } catch (e) {} }
 };
 const clone = o => JSON.parse(JSON.stringify(o));
-const SHOW_DEFAULT = { relax: true };
+const SHOW_DEFAULT = { relax: true, label: true, rose: false };
 function upgrade(z) {
   if (!z) return z;
   z.params = Object.assign({}, DEFAULT_PARAMS, z.params || {});
@@ -219,6 +220,41 @@ function axisHeading(z, prof, hRel, decl) {
   if (z.reversed) { h = n360(h + 180); if (z.axis.on && !z.axis.both) warn = 'Sens inversé : la zone n\'autorise pas cet axe dans ce sens !'; }
   return { h, why, warn, windRel: wr };
 }
+// Projection : le para quitte l'avion à sa vitesse propre, puis la traînée le freine (frottement quadratique,
+// calé sur la vitesse de chute : k = g / vff²). Renvoie la distance parcourue dans l'air, dans le sens de vol, en fonction du temps.
+const projCache = {};
+function projection(Vair, vff) {
+  const key = Vair.toFixed(2) + '|' + vff; if (projCache[key]) return projCache[key];
+  const g = 9.81, k = g / (vff * vff), dt = 0.05, step = 0.5, xs = [0];
+  let x = 0, vx = Vair, vz = 0, t = 0, next = step;
+  while (t < 120) {
+    const v = Math.hypot(vx, vz); vx += -k * v * vx * dt; vz += (g - k * v * vz) * dt; x += vx * dt; t += dt;
+    if (t >= next - 1e-9) { xs.push(x); next += step; }
+  }
+  return (projCache[key] = { step, xs, total: x, at: tt => { const i = Math.min(xs.length - 1, tt / step), a = Math.floor(i), f = i - a; return a + 1 < xs.length ? xs[a] * (1 - f) + xs[a + 1] * f : xs[xs.length - 1]; } });
+}
+// Nombre de sorties sur le vecteur : intervalle de temps minimal entre deux sorties pour que deux paras successifs
+// restent à « sep » m au moins l'un de l'autre pendant toute la chute (jusqu'à l'ouverture du premier), puis combien en tiennent sur la longueur.
+function exitsOn(sol, prof, p, proj) {
+  const vff = +p.vff, Tff = (sol.hRel - sol.h1) / vff, sep = +p.sep || 300, dt = 0.5, u = sol.u;
+  const wr = windAt(prof, sol.hRel), Vg = (+p.acMs) + wr.u * u.x + wr.v * u.y; // vitesse sol de l'avion le long de l'axe
+  if (!(Vg > 3)) return { n: 1, dt: null, s: null, Vg };
+  const F = []; let Dx = 0, Dy = 0;                                               // position d'un para t secondes après sa sortie
+  for (let t = 0; t <= Tff + 60; t += dt) {
+    const pr = proj.at(t); F.push({ x: pr * u.x + Dx, y: pr * u.y + Dy });
+    const w = windAt(prof, Math.max(sol.h1, sol.hRel - vff * (t + dt / 2))); Dx += w.u * dt; Dy += w.v * dt;
+  }
+  for (let D = 1; D <= 60; D += 0.25) {
+    const dk = D / dt, tMax = Math.max(0, Tff - D); let ok = true;
+    for (let t = 0; t <= tMax + 1e-9 && ok; t += dt) {
+      const i = Math.round(t / dt), j = i + dk, a = F[Math.min(F.length - 1, Math.floor(j))], b = F[Math.min(F.length - 1, Math.ceil(j))], fj = j - Math.floor(j);
+      const ex = D * Vg * u.x - ((a.x * (1 - fj) + b.x * fj) - F[i].x), ey = D * Vg * u.y - ((a.y * (1 - fj) + b.y * fj) - F[i].y);
+      if (Math.hypot(ex, ey) < sep) ok = false;
+    }
+    if (ok) { const sp = Vg * D; return { n: Math.floor(sol.length / sp + 1e-6) + 1, dt: D, s: sp, Vg, sep }; }
+  }
+  return { n: 1, dt: null, s: null, Vg, sep };
+}
 function solve(z, prof, rec) {
   const p = z.params, elev = elevOf(z, rec), out = { ok: false };
   const ch = chooseprv(z, prof); if (!ch) { out.err = 'Place au moins un point de rendez-vous (onglet Zones).'; return out; }
@@ -233,7 +269,10 @@ function solve(z, prof, rec) {
   Object.assign(out, { heading: ax.h, why: ax.why, warn: ax.warn, windRel: ax.windRel });
   const u = { x: Math.sin(H), y: Math.cos(H) }, r = { x: Math.cos(H), y: -Math.sin(H) };
   // 1) chute libre + ouverture (vitesse de chute), 2) 15 s perpendiculaire à l'axe, 3) navigation vers le PRV
-  const dFF = driftBetween(prof, hRel, h1, +p.vff);
+  // Chute libre : dérive due au vent + projection (vitesse de l'avion), dans le sens de vol
+  const proj = projection(+p.acMs || 0, +p.vff);
+  const dW = driftBetween(prof, hRel, h1, +p.vff), dFF = { x: dW.x + proj.total * u.x, y: dW.y + proj.total * u.y };
+  out.throwDist = proj.total; out.dW = dW; out.h1 = h1;
   const dP = driftBetween(prof, h1, h2, +p.vz), lat = Va * (+p.perpTime);
   const S = [1, -1].map(s => ({ x: dFF.x + dP.x + s * lat * r.x, y: dFF.y + dP.y + s * lat * r.y }));
   // Portée vers le PRV selon la direction suivie (route directe, dérive corrigée en crabe), du bas de la phase 2 à hMin
@@ -319,6 +358,7 @@ function solve(z, prof, rec) {
   const A = { x: base.x + seg.a * u.x, y: base.y + seg.a * u.y }, B = { x: base.x + seg.b * u.x, y: base.y + seg.b * u.y };
   out.start = Geo.fromLocal(ch.prv, A); out.end = Geo.fromLocal(ch.prv, B); out.length = seg.b - seg.a;
   out.offsetUsed = bo + (C0.x * r.x + C0.y * r.y); out.tUsed = (seg.a + seg.b) / 2 + (C0.x * u.x + C0.y * u.y);
+  out.u = u; out.exits = exitsOn(out, prof, p, proj);
   out.ok = true; return out;
 }
 // Zone réelle de largage (avec les 15 s perpendiculaires, union des deux côtés) : « patatoïde », par rayons depuis son centre
@@ -424,6 +464,7 @@ function draw(light) {
       if (relaxPts) L.polygon(relaxPts.map(LL), { color: C_RELAX, weight: 2.5, fillColor: C_RELAX, fillOpacity: .08, smoothFactor: 0, interactive: false }).addTo(fig);
       if (patPts) L.polygon(patPts.map(LL), { color: C_RELAX, weight: 2, dashArray: '6 5', fill: false, smoothFactor: 0, interactive: false }).addTo(fig);
     }
+    if (current.show.rose) { const ro = roseOf(sol); degRing(ro.c, ro.R, '#ffffff', sol.decl); }
     const a = LL(sol.start), b = LL(sol.end);
     L.polyline([a, b], { color: '#fff', weight: 10, opacity: .85, interactive: false }).addTo(fig);
     L.polyline([a, b], { color: '#000', weight: 5, interactive: false }).addTo(fig);
@@ -433,6 +474,22 @@ function draw(light) {
   placeMarkers();
 }
 
+// Rosace graduée en degrés MAGNÉTIQUES autour du vecteur (pour le largueur)
+const mPerPx = ll => 40075016.686 * Math.cos(ll.lat * Math.PI / 180) / Math.pow(2, map.getZoom() + 8);
+function roseOf(sol) { return { c: { lat: (sol.start.lat + sol.end.lat) / 2, lng: (sol.start.lng + sol.end.lng) / 2 }, R: Math.max(250, sol.length / 2 * 1.15) }; }
+function degRing(center, radius, color, decl) {
+  const mpp = mPerPx(center);
+  L.circle(LL(center), { radius, color, weight: 1.5, opacity: .85, fill: false, dashArray: '4 6', interactive: false }).addTo(grads);
+  const degs = Geo.degTicks(radius / mpp);
+  const pt = (deg, d) => { const a = (deg + decl) * Math.PI / 180; return LL(Geo.fromLocal(center, { x: d * Math.sin(a), y: d * Math.cos(a) })); };
+  const segs = [];
+  degs.forEach(deg => {
+    segs.push([pt(deg, radius), pt(deg, radius - 10 * mpp)]);
+    L.marker(pt(deg, radius + 16 * mpp), { interactive: false,
+      icon: L.divIcon({ className: 'glabel', html: `<span style="color:${color}">${deg}°</span>`, iconSize: [0, 0] }) }).addTo(grads);
+  });
+  L.polyline(segs, { color, weight: 1.5, interactive: false }).addTo(grads);
+}
 const isDragging = m => !!(m && (m._lpDragging || (m.dragging && m.dragging._draggable && m.dragging._draggable._moving)));
 
 // ---------- Appui long pour déplacer un point (portes, mesure) ----------
@@ -519,10 +576,12 @@ function placeMarkers() {
     if (!map.hasLayer(vecHit.line)) vecHit.line.addTo(map);
     // Étiquette : cap magnétique et longueur ; appui long sur le cap = le modifier
     const mid = labelPos();
-    const html = `<span><b class="vcap">${hdg(sol.heading - sol.decl)} M</b> · ${fmtInt(sol.length)} m</span>`;
+    const ne = sol.exits ? sol.exits.n : 1;
+    const html = `<span><b class="vcap">${hdg(sol.heading - sol.decl)} M</b> · ${fmtInt(sol.length)} m · <b class="vexits">${ne} sortie${ne > 1 ? 's' : ''}</b></span>`;
     if (!vecLabel) { vecLabel = L.marker(LL(mid), { zIndexOffset: 1200, icon: L.divIcon({ className: 'vlabel', iconSize: [0, 0], html }) }).addTo(map); vecLabel._html = html; longPressAction(vecLabel, editHeading); }
     else { vecLabel.setLatLng(LL(mid)); if (vecLabel._html !== html) { vecLabel.setIcon(L.divIcon({ className: 'vlabel', iconSize: [0, 0], html })); vecLabel._html = html; longPressAction(vecLabel, editHeading); } }
-    if (!map.hasLayer(vecLabel)) vecLabel.addTo(map);
+    if (current.show.label === false) { if (map.hasLayer(vecLabel)) map.removeLayer(vecLabel); }
+    else if (!map.hasLayer(vecLabel)) vecLabel.addTo(map);
   } else {
     if (vecHit && map.hasLayer(vecHit.line)) map.removeLayer(vecHit.line);
     if (vecLabel && map.hasLayer(vecLabel)) map.removeLayer(vecLabel);
@@ -579,9 +638,14 @@ function addPrv(p) {
 
 // Points à faire tenir à l'écran (et dans le PDF) : vecteur, PRV, zone de relaxation affichée
 function figurePoints() {
-  const pts = current.prvs.map(p => ({ lat: p.lat, lng: p.lng }));
-  if (sol && sol.ok) { pts.push(sol.start, sol.end); if (current.show.relax && relaxPts) relaxPts.forEach(p => pts.push(p)); }
-  if (current.prevVector && current.show.prev !== false) pts.push(current.prevVector.start, current.prevVector.end);
+  if (!sol || !sol.ok) return current.prvs.map(p => ({ lat: p.lat, lng: p.lng }));
+  const pts = [sol.start, sol.end];
+  if (current.show.relax && relaxPts) relaxPts.forEach(p => pts.push(p));
+  if (current.show.rose) { const ro = roseOf(sol); [0, 90, 180, 270].forEach(a => pts.push(Geo.fromLocal(ro.c, { x: (ro.R + 60) * Math.sin(a * Math.PI / 180), y: (ro.R + 60) * Math.cos(a * Math.PI / 180) }))); }
+  // PRV et ancien vecteur : seulement s'ils sont dans le cercle de relaxation (sinon ils réduiraient trop le zoom)
+  const inCircle = ll => { if (!sol.relax) return false; const q = Geo.toLocal(sol.prv, ll); return Math.hypot(q.x - sol.relax.c.x, q.y - sol.relax.c.y) <= sol.relax.R; };
+  current.prvs.forEach(p => { if (inCircle(p)) pts.push({ lat: p.lat, lng: p.lng }); });
+  const pv = current.prevVector; if (pv && current.show.prev !== false) [pv.start, pv.end].forEach(q => { if (inCircle(q)) pts.push(q); });
   return pts;
 }
 function freeRect() {
@@ -617,7 +681,9 @@ function updateInfo() {
       (sol.canopyWind.spd >= sol.Va ? ' : impossible de remonter au vent sous voile, il faut ouvrir au vent du PRV' : '');
   } else if (sol && sol.err) t = sol.err;
   $('axisInfo').textContent = t;
-  $('whyInfo').innerHTML = sol && sol.ok ? `Chute libre : dérive de <b>${fmtDist(Math.hypot(sol.dFF.x, sol.dFF.y))}</b> vers le ${hdg(n360(Math.atan2(sol.dFF.x, sol.dFF.y) * 180 / Math.PI))}. ` +
+  const ex = sol && sol.ok && sol.exits;
+  $('whyInfo').innerHTML = sol && sol.ok ? (ex && ex.dt ? `<b>${ex.n} sortie${ex.n > 1 ? 's' : ''}</b> : une toutes les <b>${fmt1(ex.dt)} s</b> (${fmtInt(ex.s)} m au sol, vitesse sol de l'avion ${Math.round(ex.Vg * KT)} kt) pour rester à ${ex.sep} m les uns des autres. ` : '') +
+    `Chute libre : projection ${fmtInt(sol.throwDist)} m + dérive, au total <b>${fmtDist(Math.hypot(sol.dFF.x, sol.dFF.y))}</b> vers le ${hdg(n360(Math.atan2(sol.dFF.x, sol.dFF.y) * 180 / Math.PI))}. ` +
     `Sous voile : vent moyen <b>${Math.round(sol.canopyWind.spd * KT)} kt</b> pour ${Math.round(sol.Va * KT)} kt de vitesse propre` +
     (sol.canopyWind.spd >= sol.Va ? ' <b class="warn">→ tu ne remontes pas au vent : il faut ouvrir au vent du PRV.</b>' : '.') : '';
   $('elevAuto').textContent = typeof current.elevAuto === 'number' ? `automatique : ${current.elevAuto} m` : 'automatique : inconnue (pas encore de prévision)';
@@ -633,7 +699,7 @@ function setBanner(t) { const b = $('banner'); if (!t) b.classList.add('hidden')
 let toastT;
 function toast(t) { const el = $('toast'); el.textContent = t; el.classList.remove('hidden'); clearTimeout(toastT); toastT = setTimeout(() => el.classList.add('hidden'), 3200); }
 const numIn = el => parseFloat(String(el.value).replace(',', '.'));
-const HYP = ['vff', 'openLoss', 'perpTime', 'vz', 'glide', 'hMin', 'margin'];
+const HYP = ['vff', 'openLoss', 'perpTime', 'vz', 'glide', 'hMin', 'margin', 'sep'];
 function setParam(k, v) { current.params[k] = v; profile[k] = v; store.set('vl.profile', profile); zones.forEach(applyProfile); store.set('vl.zones', zones); }
 function fillInputs(only) {
   const p = current.params;
@@ -644,6 +710,7 @@ function fillInputs(only) {
   ['p_relFL', 'j_relFL'].forEach(id => { if (document.activeElement !== $(id)) $(id).value = Math.round(fl); });
   ['p_relAGL', 'j_relAGL'].forEach(id => { if (document.activeElement !== $(id)) $(id).value = Math.round(agl); });
   if (document.activeElement !== $('j_hOpen')) $('j_hOpen').value = p.hOpen;
+  fillAc();
   $('vhInfo').textContent = `Vitesse horizontale sous voile : ${fmt1((+p.vz) * (+p.glide))} m/s (vitesse verticale × finesse).`;
   if (only) return;
   $('z_axisOn').checked = !!current.axis.on; $('z_axisBoth').checked = current.axis.both !== false;
@@ -657,6 +724,15 @@ HYP.concat(['hOpen']).forEach(k => {
   $('p_' + k).addEventListener('input', e => { const v = numIn(e.target); if (isNaN(v)) return; setParam(k, v); persist(); redraw(); });
   $('p_' + k).addEventListener('blur', () => fillInputs(true));
 });
+// Vitesse de largage de l'avion : nœuds et m/s liés (stockée en m/s)
+function fillAc() {
+  const ms = +current.params.acMs || 0;
+  if (document.activeElement !== $('p_acKt')) $('p_acKt').value = Math.round(ms * KT);
+  if (document.activeElement !== $('p_acMs')) $('p_acMs').value = fmt1(ms);
+}
+$('p_acKt').addEventListener('change', e => { const v = numIn(e.target); if (isNaN(v)) return; setParam('acMs', Math.round(v / KT * 10) / 10); current.offsetManual = null; persist(); redraw(); fillAc(); });
+$('p_acMs').addEventListener('change', e => { const v = numIn(e.target); if (isNaN(v)) return; setParam('acMs', v); current.offsetManual = null; persist(); redraw(); fillAc(); });
+['p_acKt', 'p_acMs'].forEach(id => $(id).addEventListener('keydown', e => { if (e.key === 'Enter') e.target.blur(); }));
 function setRel(mode, v) { if (isNaN(v)) return; setParam('relMode', mode); setParam(mode === 'FL' ? 'relFL' : 'relAGL', v); current.offsetManual = null; persist(); redraw(); setTimeout(() => fillInputs(true), 0); }
 ['p_relFL', 'j_relFL'].forEach(id => $(id).addEventListener('change', e => setRel('FL', numIn(e.target))));
 ['p_relAGL', 'j_relAGL'].forEach(id => $(id).addEventListener('change', e => setRel('AGL', numIn(e.target))));
@@ -676,13 +752,15 @@ function syncQuick() {
   const p = current.params;
   $('qWhen').innerHTML = `🕑 ${fmtWhen(current.when)}`;
   $('qRel').innerHTML = sol && sol.flRel ? `FL${Math.round(sol.flRel)}<br>${fmtInt(p.hOpen)} m` : `FL${Math.round(p.relMode === 'FL' ? p.relFL : aglToFl(+p.relAGL, prof, elevOf(current, wxRec)))}<br>${fmtInt(p.hOpen)} m`;
-  $('qRelax').classList.toggle('on', !!current.show.relax);
+  $('qRelax').classList.toggle('on', !!current.show.relax); $('qLabel').classList.toggle('on', current.show.label !== false); $('qTicks').classList.toggle('on', !!current.show.rose);
   $('qRev').classList.toggle('on', !!current.reversed);
   $('qPrv').textContent = current.prvManual ? 'PRV man.' : 'PRV auto'; $('qPrv').classList.toggle('on', !!current.prvManual);
   $('qVecAuto').classList.toggle('hidden', typeof current.offsetManual !== 'number');
   $('qWinds').classList.toggle('on', !$('windsBox').classList.contains('hidden'));
 }
 function quick(fn, msg) { fn(); syncQuick(); persist(); redraw(); if (msg) toast(msg()); }
+$('qLabel').addEventListener('click', () => quick(() => { current.show.label = current.show.label === false; }, () => current.show.label !== false ? 'Cartouche du vecteur affiché' : 'Cartouche du vecteur masqué'));
+$('qTicks').addEventListener('click', () => quick(() => { current.show.rose = !current.show.rose; }, () => current.show.rose ? 'Rosace en degrés magnétiques autour du vecteur' : 'Rosace masquée'));
 $('qRelax').addEventListener('click', () => quick(() => { current.show.relax = !current.show.relax; }, () => current.show.relax ? 'Zone de relaxation affichée' : 'Zone de relaxation masquée'));
 $('qRev').addEventListener('click', () => quick(() => { current.reversed = !current.reversed; current.offsetManual = null; },
   () => current.reversed ? (current.axis.on && !current.axis.both ? '⚠️ Sens inversé : la zone n\'autorise pas cet axe dans ce sens' : 'Sens de l\'axe inversé') : 'Sens normal'));
@@ -1256,8 +1334,19 @@ async function renderPdfCanvas() {
     g.save(); g.lineCap = 'round'; g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 10 * u; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
     g.strokeStyle = '#000'; g.lineWidth = 5 * u; g.stroke(); g.restore();
     dot(sol.start, C_START, 10); dot(sol.end, C_END, 10);
-    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-    shadowText(`${hdg(sol.heading - sol.decl)} M · ${fmtInt(sol.length)} m`, mx + 18 * u, my, '#fff', 17); }
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, ne = sol.exits ? sol.exits.n : 1;
+    if (current.show.label !== false) shadowText(`${hdg(sol.heading - sol.decl)} M · ${fmtInt(sol.length)} m · ${ne} sortie${ne > 1 ? 's' : ''}`, mx + 18 * u, my, '#fff', 17); }
+  if (current.show.rose) { // rosace en degrés magnétiques
+    const ro = roseOf(sol), c = toC(ro.c), Rr = ro.R * pxPerM(ro.c);
+    g.save(); g.strokeStyle = '#fff'; g.globalAlpha = .85; g.lineWidth = 1.4 * u; g.setLineDash([4 * u, 6 * u]);
+    g.beginPath(); g.arc(c.x, c.y, Rr, 0, 2 * Math.PI); g.stroke(); g.setLineDash([]); g.globalAlpha = 1;
+    Geo.degTicks(Rr / u, 40).forEach(deg => {
+      const a = pageAngle(deg + sol.decl), l = 11 * u;
+      g.beginPath(); g.moveTo(c.x + Rr * Math.sin(a), c.y - Rr * Math.cos(a)); g.lineTo(c.x + (Rr - l) * Math.sin(a), c.y - (Rr - l) * Math.cos(a)); g.stroke();
+      shadowText(`${deg}°`, c.x + (Rr + 16 * u) * Math.sin(a), c.y - (Rr + 16 * u) * Math.cos(a), '#fff', 11, 'center');
+    });
+    g.restore();
+  }
 
   // ---- Flèche du nord (coin haut gauche) ----
   const nx = 85 * u, ny = 95 * u, na = pageAngle(0);
@@ -1283,11 +1372,12 @@ async function renderPdfCanvas() {
   const col1 = 30 * u, col2 = W * 0.5, l0 = by + lh * 1.1;
   tx(`${current.name}`, col1, l0, '#fff', fs * 1.3, true);
   tx(`Saut du ${fmtWhen(current.when).replace(' ', ' à ')} · ${wxRec ? wxRec.model : ''}`, col1, l0 + lh * 1.2, '#bbb');
-  tx(`Vecteur ${hdg(sol.heading - sol.decl)} M (${hdg(sol.heading)} vrai) · ${fmtInt(sol.length)} m`, col1, l0 + lh * 2.4, '#fff', fs, true);
+  const exP = sol.exits || { n: 1 };
+  tx(`Vecteur ${hdg(sol.heading - sol.decl)} M (${hdg(sol.heading)} vrai) · ${fmtInt(sol.length)} m · ${exP.n} sortie${exP.n > 1 ? 's' : ''}${exP.dt ? ` (une toutes les ${fmt1(exP.dt)} s)` : ''}`, col1, l0 + lh * 2.4, '#fff', fs, true);
   tx(`Largage FL${Math.round(sol.flRel)} = ${fmtInt(sol.hRel)} m sol · ouverture ${fmtInt(p.hOpen)} m sol`, col1, l0 + lh * 3.4, C_END, fs, true);
   tx(`PRV ${sol.prvAuto ? 'automatique' : 'choisi à la main'} · ${sol.why}${current.reversed ? ' · sens inversé' : ''}`, col1, l0 + lh * 4.4, C_PRVUSED, fs);
   [
-    `Vent de largage : ${hdg(sol.windRel.dir)} ${Math.round(sol.windRel.spd * KT)} kt (${fmt1(sol.windRel.spd)} m/s)`,
+    `Vent de largage : ${hdg(sol.windRel.dir)} ${Math.round(sol.windRel.spd * KT)} kt (${fmt1(sol.windRel.spd)} m/s) · avion ${Math.round(p.acMs * KT)} kt`,
     `Chute ${p.vff} m/s · perte à l'ouverture ${p.openLoss} m`,
     `${p.perpTime} s perpendiculaire · Vz ${fmt1(+p.vz)} m/s · finesse ${fmt1(+p.glide)}`,
     `Arrivée au PRV à ${p.hMin} m minimum · marge de sécurité ${sol.margin} % · terrain ${Math.round(sol.elev)} m`,
