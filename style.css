@@ -146,3 +146,4 @@ button.danger{border-color:#a33;color:#ff8a8a}
 #windsTable td:nth-child(3),#windsTable td:nth-child(4){font-weight:700;color:#fff}
 .dim{opacity:.5}
 h4{margin:12px 0 4px;font-size:13px;color:#aaa;text-transform:uppercase;letter-spacing:.04em}
+#quick #qTraj{border-color:#ff8c00}#quick #qTraj:not(.on){opacity:.55;text-decoration:line-through}

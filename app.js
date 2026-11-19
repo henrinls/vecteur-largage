@@ -4,7 +4,7 @@ window.addEventListener('error', e => {
   const t = document.getElementById('toast');
   if (t) { t.textContent = 'Erreur : ' + (e.message || 'inconnue') + ' — ferme et rouvre l\'appli'; t.classList.remove('hidden'); }
 });
-const VERSION = '0.2.0';
+const VERSION = '0.2.1';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -128,7 +128,7 @@ const store = {
   del(k) { try { localStorage.removeItem(k); } catch (e) {} }
 };
 const clone = o => JSON.parse(JSON.stringify(o));
-const SHOW_DEFAULT = { relax: true };
+const SHOW_DEFAULT = { relax: true, traj: true };
 function upgrade(z) {
   if (!z) return z;
   z.params = Object.assign({}, DEFAULT_PARAMS, z.params || {});
@@ -255,7 +255,10 @@ function solve(z, prof, rec) {
   const C0 = { x: -(S[0].x + S[1].x) / 2, y: -(S[0].y + S[1].y) / 2 };
   let Rmax = 0; for (let d = 0; d < 360; d++) Rmax = Math.max(Rmax, Rt[d]);
   const Rs = Rmax + lat + 200;
-  Object.assign(out, { u, r, S, C0, Rs, inside, dFF, Rmax });
+  // Vent moyen sous voile (de la fin des 15 s jusqu'à l'arrivée au PRV), pour l'explication
+  let cu = 0, cv = 0, cn = 0; for (let h = h2; h > hMin; h -= DH) { const w = windAt(prof, h); cu += w.u; cv += w.v; cn++; }
+  const canopyWind = spdDir({ u: cu / Math.max(cn, 1), v: cv / Math.max(cn, 1) });
+  Object.assign(out, { u, r, S, C0, Rs, inside, dFF, dP, Rmax, Rt, reach, canopyWind, h1, h2 });
   // Recherche du plus long segment parallèle à l'axe, entièrement dans la zone
   const step = 10;
   const runOn = (o, tWant) => {
@@ -291,6 +294,14 @@ function solve(z, prof, rec) {
   const A = { x: base.x + seg.a * u.x, y: base.y + seg.a * u.y }, B = { x: base.x + seg.b * u.x, y: base.y + seg.b * u.y };
   out.start = Geo.fromLocal(ch.prv, A); out.end = Geo.fromLocal(ch.prv, B); out.length = seg.b - seg.a;
   out.ok = true; return out;
+}
+// Trajectoire depuis un point de largage : largage → ouverture → fin des 15 s (meilleur côté) → PRV
+function trajOf(sol, ll) {
+  const A = Geo.toLocal(sol.prv, ll), O = { x: A.x + sol.dFF.x, y: A.y + sol.dFF.y };
+  let best = null, bm = -Infinity;
+  sol.S.forEach(S => { const q = { x: A.x + S.x, y: A.y + S.y }, d = Math.hypot(q.x, q.y), b = n360(Math.atan2(-q.x, -q.y) * 180 / Math.PI), i = Math.floor(b), f = b - i;
+    const m = sol.Rt[i] * (1 - f) + sol.Rt[Math.min(i + 1, 360)] * f - d; if (m > bm) { bm = m; best = q; } });
+  return { pts: [ll, Geo.fromLocal(sol.prv, O), Geo.fromLocal(sol.prv, best), { lat: sol.prv.lat, lng: sol.prv.lng }], drift: Math.hypot(sol.dFF.x, sol.dFF.y), margin: bm };
 }
 // Contour de la zone de relaxation (union des deux côtés), par rayons depuis son centre
 function relaxPolygon(sol) {
@@ -383,10 +394,17 @@ function draw(light) {
   }
   if (sol.ok) {
     if (current.show.relax) {
-      const key = [current.when, sol.heading, sol.prv.id, JSON.stringify(current.params), sol.elev].join('|');
+      const key = [current.when, sol.heading, sol.prv.id, JSON.stringify(current.params), sol.elev, wxRec && wxRec.fetched].join('|');
       if (!light && key !== relaxKey) { relaxPts = relaxPolygon(sol); relaxKey = key; }
       if (relaxPts) L.polygon(relaxPts.map(LL), { color: C_RELAX, weight: 2, dashArray: '6 5', fillColor: C_RELAX, fillOpacity: .08, interactive: false }).addTo(fig);
     }
+    if (current.show.traj) [sol.start, sol.end].forEach((pt, k) => { // trajectoires depuis les deux bouts du vecteur
+      const T = trajOf(sol, pt), P = T.pts.map(LL);
+      L.polyline([P[0], P[1]], { color: '#fff', weight: 2.5, dashArray: '2 6', interactive: false }).addTo(fig);
+      L.polyline([P[1], P[2]], { color: '#ff8c00', weight: 3, interactive: false }).addTo(fig);
+      L.polyline([P[2], P[3]], { color: '#ffd400', weight: 2.5, dashArray: '8 6', opacity: .9, interactive: false }).addTo(fig);
+      L.marker(P[1], { interactive: false, zIndexOffset: 500, icon: dotIcon('#ffffff', 11, k ? '' : `ouverture · dérive ${fmtDist(T.drift)}`) }).addTo(fig);
+    });
     const a = LL(sol.start), b = LL(sol.end);
     L.polyline([a, b], { color: '#fff', weight: 10, opacity: .85, interactive: false }).addTo(fig);
     L.polyline([a, b], { color: '#000', weight: 5, interactive: false }).addTo(fig);
@@ -573,9 +591,14 @@ function updateInfo() {
   if (sol && sol.ok) {
     t = `Vecteur ${hdg(sol.heading - sol.decl)} M (${hdg(sol.heading)} vrai, déclinaison ${fmt1(sol.decl)}°) · ${fmtInt(sol.length)} m · ${sol.why}` +
       ` · largage FL${Math.round(sol.flRel)} = ${fmtInt(sol.hRel)} m sol · vent de largage ${hdg(sol.windRel.dir)} ${Math.round(sol.windRel.spd * KT)} kt` +
-      ` · PRV ${sol.prvAuto ? 'automatique (le plus au vent)' : 'choisi à la main'}`;
+      ` · PRV ${sol.prvAuto ? 'automatique (le plus au vent)' : 'choisi à la main'}` +
+      ` · dérive en chute libre ${fmtDist(Math.hypot(sol.dFF.x, sol.dFF.y))} · vent moyen sous voile ${hdg(sol.canopyWind.dir)} ${Math.round(sol.canopyWind.spd * KT)} kt pour une vitesse sous voile de ${Math.round(sol.Va * KT)} kt` +
+      (sol.canopyWind.spd >= sol.Va ? ' : impossible de remonter au vent sous voile, il faut ouvrir au vent du PRV' : '');
   } else if (sol && sol.err) t = sol.err;
   $('axisInfo').textContent = t;
+  $('whyInfo').innerHTML = sol && sol.ok ? `Chute libre : dérive de <b>${fmtDist(Math.hypot(sol.dFF.x, sol.dFF.y))}</b> vers le ${hdg(n360(Math.atan2(sol.dFF.x, sol.dFF.y) * 180 / Math.PI))}. ` +
+    `Sous voile : vent moyen <b>${Math.round(sol.canopyWind.spd * KT)} kt</b> pour ${Math.round(sol.Va * KT)} kt de vitesse propre` +
+    (sol.canopyWind.spd >= sol.Va ? ' <b class="warn">→ tu ne remontes pas au vent : il faut ouvrir au vent du PRV.</b>' : '.') : '';
   $('elevAuto').textContent = typeof current.elevAuto === 'number' ? `automatique : ${current.elevAuto} m` : 'automatique : inconnue (pas encore de prévision)';
   $('prevBox').classList.toggle('hidden', !current.prevVector);
   if (current.prevVector) $('prevInfo').textContent = `Ancien vecteur du ${fmtWhen(current.prevVector.when)} : ${hdg(current.prevVector.heading - (current.prevVector.decl || 0))} M, ${fmtInt(current.prevVector.length)} m`;
@@ -632,13 +655,14 @@ function syncQuick() {
   const p = current.params;
   $('qWhen').innerHTML = `🕑 ${fmtWhen(current.when)}`;
   $('qRel').innerHTML = sol && sol.flRel ? `FL${Math.round(sol.flRel)}<br>${fmtInt(p.hOpen)} m` : `FL${Math.round(p.relMode === 'FL' ? p.relFL : aglToFl(+p.relAGL, prof, elevOf(current, wxRec)))}<br>${fmtInt(p.hOpen)} m`;
-  $('qRelax').classList.toggle('on', !!current.show.relax);
+  $('qRelax').classList.toggle('on', !!current.show.relax); $('qTraj').classList.toggle('on', !!current.show.traj);
   $('qRev').classList.toggle('on', !!current.reversed);
   $('qPrv').textContent = current.prvManual ? 'PRV man.' : 'PRV auto'; $('qPrv').classList.toggle('on', !!current.prvManual);
   $('qVecAuto').classList.toggle('hidden', typeof current.offsetManual !== 'number');
   $('qWinds').classList.toggle('on', !$('windsBox').classList.contains('hidden'));
 }
 function quick(fn, msg) { fn(); syncQuick(); persist(); redraw(); if (msg) toast(msg()); }
+$('qTraj').addEventListener('click', () => quick(() => { current.show.traj = !current.show.traj; }, () => current.show.traj ? 'Trajectoires affichées : largage → ouverture (blanc) → 15 s (orange) → PRV (jaune)' : 'Trajectoires masquées'));
 $('qRelax').addEventListener('click', () => quick(() => { current.show.relax = !current.show.relax; }, () => current.show.relax ? 'Zone de relaxation affichée' : 'Zone de relaxation masquée'));
 $('qRev').addEventListener('click', () => quick(() => { current.reversed = !current.reversed; current.offsetManual = null; },
   () => current.reversed ? (current.axis.on && !current.axis.both ? '⚠️ Sens inversé : la zone n\'autorise pas cet axe dans ce sens' : 'Sens de l\'axe inversé') : 'Sens normal'));

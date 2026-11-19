@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>vecteur-largage</title>
 <link rel="stylesheet" href="vendor/leaflet.css">
-<link rel="stylesheet" href="style.css?v=0.2.0">
+<link rel="stylesheet" href="style.css?v=0.2.1">
 </head>
 <body>
 <div id="map"></div>
@@ -36,6 +36,7 @@
   <button id="qRel" title="Hauteur de largage et d'ouverture"></button>
   <button id="qWinds" title="Tableau des vents">🌬</button>
   <button id="qRelax" title="Afficher / masquer la zone de relaxation">Relax</button>
+  <button id="qTraj" title="Afficher / masquer les trajectoires depuis les bouts du vecteur">Traj.</button>
   <button id="qRev" title="Inverser le sens de l'axe">⇅ Sens</button>
   <button id="qPrv" title="PRV automatique ou choisi à la main">PRV auto</button>
   <button id="qVecAuto" class="hidden" title="Replacer le vecteur au mieux">Vect. auto</button>
@@ -51,6 +52,7 @@
     <div><label>Ouverture (m sol)</label><input id="j_hOpen" inputmode="numeric"></div>
   </div>
   <p class="hint" id="wxInfo"></p>
+  <p class="hint" id="whyInfo"></p>
   <button id="jumpOk" class="wide primary">OK</button>
 </div>
 
@@ -198,11 +200,11 @@
 
 <div id="toast" class="hidden"></div>
 
-<script src="vendor/leaflet.js?v=0.2.0"></script>
-<script src="vendor/leaflet-rotate.js?v=0.2.0"></script>
-<script src="geo.js?v=0.2.0"></script>
-<script src="wmm.js?v=0.2.0"></script>
-<script src="app.js?v=0.2.0"></script>
-<script src="photo.js?v=0.2.0"></script>
+<script src="vendor/leaflet.js?v=0.2.1"></script>
+<script src="vendor/leaflet-rotate.js?v=0.2.1"></script>
+<script src="geo.js?v=0.2.1"></script>
+<script src="wmm.js?v=0.2.1"></script>
+<script src="app.js?v=0.2.1"></script>
+<script src="photo.js?v=0.2.1"></script>
 </body>
 </html>
