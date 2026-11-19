@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.8.3';
+const VERSION = '0.8.4';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -584,10 +584,13 @@ function placeMarkers() {
     if (!vecHit) {
       const line = L.polyline([LL(sol.start), LL(sol.end)], { color: '#fff', weight: 30, opacity: 0, interactive: true, bubblingMouseEvents: true }).addTo(map);
       const handle = { _lpDragging: false, getElement: () => line._path, setLatLng: () => {} };
-      vecHit = { line, handle };
-      longPressDrag(handle, ll => { setManualPoint(ll); draw(true); }, () => { if (sol && sol.ok) { current.offsetManual = sol.offsetUsed; current.tManual = sol.tUsed; } persist(); redraw(); toast('Vecteur déplacé. « Vect. auto » (à gauche) pour revenir au meilleur placement.'); });
+      vecHit = { line, handle, attachedEl: null };
     } else if (!vecHit.handle._lpDragging) vecHit.line.setLatLngs([LL(sol.start), LL(sol.end)]);
     if (!map.hasLayer(vecHit.line)) vecHit.line.addTo(map);
+    // Leaflet recrée l'élément <path> à chaque retour du trait sur la carte : rebrancher l'appui long sur le nouvel élément
+    if (vecHit.line._path && vecHit.attachedEl !== vecHit.line._path) { vecHit.attachedEl = vecHit.line._path; const handle = vecHit.handle;
+      longPressDrag(handle, ll => { setManualPoint(ll); draw(true); }, () => { if (sol && sol.ok) { current.offsetManual = sol.offsetUsed; current.tManual = sol.tUsed; } persist(); redraw(); toast('Vecteur déplacé. « Vect. auto » (à gauche) pour revenir au meilleur placement.'); });
+    }
     // Étiquette : cap magnétique et longueur ; appui long sur le cap = le modifier
     const mid = labelPos();
     const ne = sol.exits ? sol.exits.n : 1;
