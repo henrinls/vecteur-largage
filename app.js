@@ -4,7 +4,7 @@ window.addEventListener('error', e => {
   const t = document.getElementById('toast');
   if (t) { t.textContent = 'Erreur : ' + (e.message || 'inconnue') + ' — ferme et rouvre l\'appli'; t.classList.remove('hidden'); }
 });
-const VERSION = '0.8.0';
+const VERSION = '0.8.1';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -822,7 +822,7 @@ function renderWinds() {
   if (!pr) { tb.innerHTML = '<tr><td colspan="6" class="mut">Pas de donnée pour cette heure.</td></tr>'; return; }
   windRows(pr, elev).forEach(r => {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${r.lab}</td><td>${fmtInt(r.h)}</td><td>${hdgN(r.dir)}</td><td>${Math.round(r.spd * KT)}</td><td>${fmt1(r.spd)}</td><td>${r.T == null ? '–' : Math.round(r.T)}</td>`;
+    tr.innerHTML = `<td>${r.lab}</td><td>${fmtInt(r.h)} m</td><td>${hdgN(r.dir)}</td><td>${Math.round(r.spd * KT)} kt</td><td>${fmt1(r.spd)} m/s</td><td>${r.T == null ? '–' : Math.round(r.T) + ' °C'}</td>`; // unité à côté de chaque chiffre
     tb.append(tr);
   });
 }
@@ -1416,12 +1416,12 @@ function pdfWindsPage(doc) {
   doc.text(`Vents – ${current.name} – ${fmtWhen(current.when).replace(' ', ' à ')}`, 15, 18);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
   doc.text(`${wxRec.model} via Open-Meteo, téléchargée le ${new Date(wxRec.fetched).toLocaleString('fr-FR')} · terrain ${Math.round(elev)} m`, 15, 25);
-  const cols = [['Niveau', 15], ['Hauteur sol (m)', 45], ['Vient du (° M)', 85], ['Nœuds', 115], ['m/s', 140], ['°C', 165]];
+  const cols = [['Niveau', 15], ['Hauteur sol', 45], ['Vient du (M)', 85], ['Vitesse', 115], ['', 140], ['Temp.', 165]];
   let y = 35; doc.setFont('helvetica', 'bold'); doc.setFontSize(10); cols.forEach(([t, x]) => doc.text(t, x, y)); doc.setFont('helvetica', 'normal');
   windRows(prof, elev).forEach((r, i) => {
     y += 6.6; if (y > 285) { doc.addPage('a4', 'portrait'); y = 20; }
     if (i % 2 === 0) { doc.setFillColor(238, 238, 238); doc.rect(13, y - 4.6, 184, 6.4, 'F'); }
-    [r.lab, fmtInt(r.h).replace(/[\u202f\u00a0]/g, ' '), hdgN(r.dir), String(Math.round(r.spd * KT)), fmt1(r.spd), r.T == null ? '–' : String(Math.round(r.T))].forEach((t, k) => doc.text(t, cols[k][1], y));
+    [r.lab, fmtInt(r.h).replace(/[\u202f\u00a0]/g, ' ') + ' m', hdgN(r.dir), Math.round(r.spd * KT) + ' kt', fmt1(r.spd) + ' m/s', r.T == null ? '–' : Math.round(r.T) + ' °C'].forEach((t, k) => doc.text(t, cols[k][1], y));
   });
 }
 

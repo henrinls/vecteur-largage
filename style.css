@@ -139,7 +139,7 @@ button.danger{border-color:#a33;color:#ff8a8a}
 .jrow label{font-size:12px;color:#aaa;display:block;margin-bottom:2px}
 .warn{color:#ffd400}
 #windsBox .tw{overflow:auto;flex:1;margin:6px 0}
-#windsTable{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
+#windsTable{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
 #windsTable th{position:sticky;top:0;background:#222;color:#aaa;font-size:11px;font-weight:600;padding:5px 4px;text-align:right}
 #windsTable td{padding:4px;text-align:right;border-bottom:1px solid #2a2a2a}
 #windsTable td:first-child,#windsTable th:first-child{text-align:left;color:#9cf}
@@ -160,3 +160,7 @@ select{width:100%;padding:10px;border-radius:10px;background:#202020;color:#eee;
 #jumpBox .when select.hr{flex:1}
 @media (orientation:landscape){#jumpBox{left:150px}}
 .jrow>div{display:flex;flex-direction:column;justify-content:flex-end}
+
+#windsTable td,#windsTable th{white-space:nowrap;padding-left:3px;padding-right:3px} /* unités à côté des chiffres : pas de retour à la ligne */
+#windsTable th[colspan]{text-align:center}
+#windsTable th{white-space:normal;vertical-align:bottom;line-height:1.15}
