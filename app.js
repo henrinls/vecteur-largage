@@ -4,7 +4,7 @@ window.addEventListener('error', e => {
   const t = document.getElementById('toast');
   if (t) { t.textContent = 'Erreur : ' + (e.message || 'inconnue') + ' — ferme et rouvre l\'appli'; t.classList.remove('hidden'); }
 });
-const VERSION = '0.4.3';
+const VERSION = '0.4.4';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -61,7 +61,7 @@ async function wxFetch(z, date) {
   const rec = { date, fetched: Date.now(), model: used.name, elev: js.elevation, hourly: js.hourly };
   const k = wxKey(z.id, date); wxMem[k] = rec; store.set(k, rec);
   // ménage : on ne garde que les 4 derniers jours téléchargés de chaque zone
-  try { Object.keys(localStorage).filter(x => x.startsWith(`vl.wx.${z.id || 'tmp'}.`)).sort().slice(0, -4).forEach(x => store.del(x)); } catch (e) {}
+  try { const keepDay = z.vector && z.vector.when ? wxKey(z.id, z.vector.when.slice(0, 10)) : null; Object.keys(localStorage).filter(x => x.startsWith(`vl.wx.${z.id || 'tmp'}.`) && x !== keepDay).sort().slice(0, -4).forEach(x => store.del(x)); } catch (e) {}
   if (typeof js.elevation === 'number') { z.elevAuto = Math.round(js.elevation); }
   return rec;
 }
@@ -762,7 +762,7 @@ $('qVecAuto').addEventListener('click', () => quick(() => { current.offsetManual
 function syncJump() {
   if (document.activeElement !== $('j_date')) $('j_date').value = current.when.slice(0, 10);
   $('j_hour').textContent = current.when.slice(11, 13) + ' h';
-  $('wxInfo').innerHTML = wxStatus(wxRec, current.when);
+  $('wxInfo').innerHTML = (current.holdWx ? `<b class="warn">Vecteur gardé du ${fmtWhen(current.when)}</b> · « Maintenant » pour le mettre à jour.<br>` : '') + wxStatus(wxRec, current.when);
 }
 const fmtFetched = ts => { const d = new Date(ts); return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)} à ${pad2(d.getHours())}h${pad2(d.getMinutes())}`; };
 const wxFailed = {}; // jour → dernier téléchargement raté
@@ -776,19 +776,19 @@ let wxBusy = false;
 async function ensureWx(force, date) {
   date = date || current.when.slice(0, 10);
   const have = wxCached(current.id, date);
-  if (have && !force && Date.now() - have.fetched < 3600e3) return have;
+  if (have && !force && (current.holdWx || Date.now() - have.fetched < 3600e3)) return have; // vecteur gardé : prévision figée
   if (wxBusy) return have; wxBusy = true; $('wxInfo').innerHTML = 'Téléchargement de la prévision…';
   try { const r = await wxFetch(current, date); delete wxFailed[date]; persist(); return r; }
   catch (e) { wxFailed[date] = true; toast(have ? 'Pas de réseau : prévision gardée, téléchargée le ' + fmtFetched(have.fetched) : 'Prévision impossible à télécharger (réseau ?)'); return have; }
   finally { wxBusy = false; redraw(); setTimeout(() => fillInputs(true), 0); syncJump(); }
 }
-function setWhen(w) { current.when = w; current.offsetManual = null; persist(); redraw(); syncJump(); ensureWx(false); }
+function setWhen(w) { current.holdWx = false; current.when = w; current.offsetManual = null; persist(); redraw(); syncJump(); ensureWx(false); }
 $('qWhen').addEventListener('click', () => $('jumpBox').classList.toggle('hidden'));
 $('qRel').addEventListener('click', () => $('jumpBox').classList.toggle('hidden'));
 $('jumpOk').addEventListener('click', () => { $('jumpBox').classList.add('hidden'); if (sol && sol.ok) fitFigure(); });
 $('j_minus').addEventListener('click', () => setWhen(shiftWhen(current.when, -1)));
 $('j_plus').addEventListener('click', () => setWhen(shiftWhen(current.when, 1)));
-$('j_now').addEventListener('click', () => { current.when = nowWhen(); persist(); syncJump(); ensureWx(true); });
+$('j_now').addEventListener('click', () => { current.holdWx = false; current.when = nowWhen(); persist(); syncJump(); ensureWx(true); });
 $('j_date').addEventListener('change', e => { if (e.target.value) setWhen(e.target.value + current.when.slice(10)); });
 
 // ---------- Tableau des vents (date et heure indépendantes de la carte) ----------
@@ -832,10 +832,10 @@ $('btnPlaceP').addEventListener('click', () => {
 // À l'ouverture d'une zone : vecteur déjà calculé → l'afficher ou mettre à jour à maintenant
 async function askOldVector() {
   const v = current.vector, now = nowWhen();
-  if (!v || !v.when || v.when === now) { current.when = now; return; }
-  const r = await ask(`Un vecteur de largage existe pour cette zone (saut du ${fmtWhen(v.when)}).`, undefined, null, 'Mettre à jour à maintenant', 'Afficher ce vecteur');
-  if (r !== true) { current.when = v.when; persist(); redraw(); syncJump(); return; }
-  current.when = now; persist(); redraw(); syncJump(); ensureWx(true);
+  if (!v || !v.when || v.when === now) { current.when = now; current.holdWx = false; return; }
+  const r = await ask(`Un vecteur de largage est enregistré pour cette zone (saut du ${fmtWhen(v.when)}).`, undefined, null, 'Mettre à jour à maintenant', 'Garder ce vecteur');
+  if (r !== true) { current.when = v.when; current.holdWx = true; persist(); redraw(); syncJump(); return; } // gardé tel quel, avec sa date et son heure
+  current.holdWx = false; current.when = now; persist(); redraw(); syncJump(); ensureWx(true);
 }
 
 // ---------- Mesure : cap et distance entre deux points touchés (dans l'ordre) ----------
