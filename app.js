@@ -4,7 +4,7 @@ window.addEventListener('error', e => {
   const t = document.getElementById('toast');
   if (t) { t.textContent = 'Erreur : ' + (e.message || 'inconnue') + ' — ferme et rouvre l\'appli'; t.classList.remove('hidden'); }
 });
-const VERSION = '0.6.1';
+const VERSION = '0.6.2';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -1340,11 +1340,12 @@ async function renderPdfCanvas() {
   const poly = (pts, stroke, fill, w, dash) => { if (!pts || pts.length < 3) return; g.save(); g.beginPath(); pts.forEach((ll, i) => { const q = toC(ll); i ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y); }); g.closePath();
     if (fill) { g.fillStyle = fill; g.fill(); } g.strokeStyle = stroke; g.lineWidth = w * u; g.setLineDash(dash ? dash.map(d => d * u) : []); g.stroke(); g.restore(); };
   if (current.show.relax) { poly(relaxPolygon(sol), C_RELAX, 'rgba(0,229,255,.08)', 2.6); poly(patatoidPolygon(sol), C_RELAX, null, 2.2, [8, 6]); }
-  current.prvs.forEach(p => { const used = sol.prv && p.id === sol.prv.id; dot(p, used ? C_PRVUSED : C_PRV, used ? 12 : 7); }); // PDF : tailles d'impression (non réduites comme la carte)
+  // PDF = même dessin que la carte, juste plus épais pour l'impression : PRV de même taille, l'inactif en transparence
+  current.prvs.forEach(p => { const used = sol.prv && p.id === sol.prv.id; g.save(); g.globalAlpha = used ? 1 : 0.5; dot(p, used ? C_PRVUSED : C_PRV, 9); g.restore(); });
   { const a = toC(sol.start), b = toC(sol.end);
     g.save(); g.lineCap = 'round'; g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 10 * u; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
     g.strokeStyle = '#000'; g.lineWidth = 5 * u; g.stroke(); g.restore();
-    dot(sol.start, C_START, 10); dot(sol.end, C_END, 10);
+    dot(sol.start, C_START, 9); dot(sol.end, C_END, 9); // même taille que les PRV, comme à l'écran
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, ne = sol.exits ? sol.exits.n : 1;
     /* PDF : jamais de cartouche sur la carte, tout est dans le bandeau d'informations */ }
   if (current.show.rose) { // rosace en degrés magnétiques
