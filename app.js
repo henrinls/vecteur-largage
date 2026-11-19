@@ -4,7 +4,7 @@ window.addEventListener('error', e => {
   const t = document.getElementById('toast');
   if (t) { t.textContent = 'Erreur : ' + (e.message || 'inconnue') + ' — ferme et rouvre l\'appli'; t.classList.remove('hidden'); }
 });
-const VERSION = '0.7.0';
+const VERSION = '0.7.1';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -135,7 +135,7 @@ function upgrade(z) {
   z.params = Object.assign({}, DEFAULT_PARAMS, z.params || {});
   z.show = Object.assign({}, SHOW_DEFAULT, typeof z.show === 'object' && z.show ? z.show : {});
   z.prvs = Array.isArray(z.prvs) ? z.prvs : [];
-  z.axis = Object.assign({ on: false, mag: 0, both: true, ref: 'mag' }, z.axis || {});
+  z.axis = Object.assign({ on: false, mag: 0, both: true }, z.axis || {}); delete z.axis.ref;
   if (z.elevManual !== null && typeof z.elevManual !== 'number') z.elevManual = null;
   if (z.prvManual === undefined) z.prvManual = null;
   if (z.headingOverride === undefined) z.headingOverride = null; // cap vrai imposé à la main (appui long sur le cap)
@@ -207,17 +207,13 @@ function chooseprv(z, prof) {
   z.prvs.forEach(p => { const v = Geo.toLocal(c, p), s = v.x * f.x + v.y * f.y; if (s > bs) { bs = s; best = p; } });
   return { prv: best, auto: true, lowWind: w };
 }
-// Convergence du quadrillage UTM (angle du nord vrai au nord du quadrillage, + à l'est du méridien central du fuseau)
-function gridConvAt(z) { const c = z.prvs.length ? prvCentroid(z) : z.center, l0 = (Math.floor((c.lng + 180) / 6) + 1) * 6 - 183, r = Math.PI / 180; return Math.atan(Math.tan((c.lng - l0) * r) * Math.sin(c.lat * r)) / r; }
-// Cap imposé de la zone, ramené en vrai selon sa référence (magnétique, vrai ou quadrillage de la carte)
-function axisTrue(z, decl) { const v = +z.axis.mag, ref = z.axis.ref || 'mag'; return n360(ref === 'mag' ? v + decl : ref === 'grid' ? v + gridConvAt(z) : v); }
 function declAt(z) { const c = z.prvs.length ? prvCentroid(z) : z.center; try { return magDeclination(c.lat, c.lng, new Date()); } catch (e) { return 0; } }
 // Cap de l'axe (vrai) : face au vent à la hauteur de largage, ou axe imposé, ou cap choisi à la main ; puis sens inversé si demandé
 function axisHeading(z, prof, hRel, decl) {
   const wr = spdDir(windAt(prof, hRel)), into = wr.dir;
   let h = into, why = 'face au vent de largage', warn = null;
   if (z.axis.on) {
-    const ax = axisTrue(z, decl);
+    const ax = n360(+z.axis.mag + decl);
     if (z.axis.both) { const d1 = diffB(ax, into), d2 = diffB(ax + 180, into); h = Math.abs(d1 - d2) < 0.5 ? ax : (d1 <= d2 ? ax : n360(ax + 180)); }
     else h = ax;
     why = 'axe imposé';
@@ -717,9 +713,6 @@ function fillInputs(only) {
   if (only) return;
   $('z_axisOn').checked = !!current.axis.on; $('z_axisBoth').checked = current.axis.both !== false;
   if (document.activeElement !== $('z_axisMag')) $('z_axisMag').value = current.axis.on ? Math.round(current.axis.mag) : (current.axis.mag || '');
-  $('z_axisRef').value = current.axis.ref || 'mag';
-  { const dc = declAt(current), gc = gridConvAt(current), t = axisTrue(current, dc), s = x => (x >= 0 ? '+' : '−') + fmt1(Math.abs(x));
-    $('axisConv').textContent = current.axis.on || current.axis.mag ? `Soit ${hdg(t - dc)} magnétique = ${hdg(t)} vrai = ${hdg(t - gc)} carte (déclinaison ${s(dc)}°, convergence du quadrillage ${s(gc)}°). Le 📏 donne le cap vrai.` : ''; }
   $('axisRow').classList.toggle('dim', !current.axis.on);
   if (document.activeElement !== $('z_elev')) $('z_elev').value = typeof current.elevManual === 'number' ? current.elevManual : '';
   syncQuick(); syncJump();
@@ -756,7 +749,6 @@ $('j_hOpen').addEventListener('change', e => { const v = numIn(e.target); if (!i
 
 // ---------- Onglet Zones : axe imposé, altitude du terrain, ancien vecteur ----------
 $('z_axisOn').addEventListener('change', e => { current.axis.on = e.target.checked; current.headingOverride = null; current.reversed = false; current.offsetManual = null; persist(); fillInputs(); redraw(); });
-$('z_axisRef').addEventListener('change', e => { current.axis.ref = e.target.value; current.headingOverride = null; current.offsetManual = null; persist(); fillInputs(); redraw(); });
 $('z_axisBoth').addEventListener('change', e => { current.axis.both = e.target.checked; persist(); redraw(); });
 $('z_axisMag').addEventListener('change', e => { const v = numIn(e.target); if (isNaN(v)) return; current.axis.mag = n360(v); current.axis.on = true; current.headingOverride = null; current.offsetManual = null; persist(); fillInputs(); redraw(); });
 $('z_elev').addEventListener('change', e => { const raw = e.target.value.trim(); current.elevManual = raw === '' ? null : numIn(e.target); if (isNaN(current.elevManual)) current.elevManual = null; persist(); fillInputs(); redraw(); });
@@ -892,8 +884,10 @@ function measMarker(key) {
 }
 function updateMeasure() {
   if (!meas.a || !meas.b) return;
-  const a = meas.a, b = meas.b, d = map.distance(LL(a), LL(b)), c = capDeg(a, b), mid = [(a.lat + b.lat) / 2, (a.lng + b.lng) / 2];
-  const txt = `${hdg(c)} · ${fmtDist(d)}`;
+  const a = meas.a, b = meas.b, d = map.distance(LL(a), LL(b)), mid = [(a.lat + b.lat) / 2, (a.lng + b.lng) / 2];
+  let dec = 0; try { dec = magDeclination(mid[0], mid[1], new Date()); } catch (e) {}
+  const c = capDeg(a, b) - dec; // cap magnétique (vrai − déclinaison)
+  const txt = `${hdg(c)} M · ${fmtDist(d)}`;
   if (!meas.line) {
     meas.halo = L.polyline([LL(a), LL(b)], { color: '#000', weight: 3.5, opacity: .5, interactive: false }).addTo(measLayer);
     meas.line = L.polyline([LL(a), LL(b)], { color: '#00e5ff', weight: 2, dashArray: '8 6', interactive: false }).addTo(measLayer);
@@ -902,7 +896,7 @@ function updateMeasure() {
     meas.halo.setLatLngs([LL(a), LL(b)]); meas.line.setLatLngs([LL(a), LL(b)]); meas.lbl.setLatLng(mid);
     const el = meas.lbl.getElement && meas.lbl.getElement(); if (el) el.querySelector('span').textContent = txt;
   }
-  measBox(`<b>Cap ${hdg(c)} · ${fmtDist(d)}</b><br><small>Appui long sur un point puis glisse pour ajuster · 📏 = effacer</small>`);
+  measBox(`<b>Cap ${hdg(c)} magnétique · ${fmtDist(d)}</b><br><small>Appui long sur un point puis glisse pour ajuster · 📏 = effacer</small>`);
 }
 function measureClick(p) {
   if (!meas.a) { meas.a = p; meas.ma = measMarker('a'); measBox('Mesure : touche le <b>2e point</b>'); return; }
