@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.9.0';
+const VERSION = '0.9.1';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -259,27 +259,15 @@ function projection(Vair, vff) {
     zAt: tt => tt <= T ? lerp(zs, tt) : zEnd + vff * (tt - T),                       // hauteur perdue après tt secondes
     fallTime: H => { if (H >= zEnd) return T + (H - zEnd) / vff; let lo = 0, hi = T; for (let n = 0; n < 40; n++) { const m = (lo + hi) / 2; if (lerp(zs, m) < H) lo = m; else hi = m; } return (lo + hi) / 2; } });
 }
-// Nombre de sorties sur le vecteur : intervalle de temps minimal entre deux sorties pour que deux paras successifs
-// restent à « sep » m au moins l'un de l'autre pendant toute la chute (jusqu'à l'ouverture du premier), puis combien en tiennent sur la longueur.
-function exitsOn(sol, prof, p, proj) {
-  const vff = +p.vff, Tff = proj.fallTime(sol.hRel - sol.hOpen), sep = +p.sep || 300, dt = 0.5, u = sol.u;
-  const wr = windAt(prof, sol.hRel), Vg = sol.tas + wr.u * u.x + wr.v * u.y; // vitesse sol de l'avion le long de l'axe (vitesse vraie + vent)
-  if (!(Vg > 3)) return { n: 1, dt: null, s: null, Vg };
-  const F = []; let Dx = 0, Dy = 0;                                               // position d'un para t secondes après sa sortie
-  for (let t = 0; t <= Tff + 60; t += dt) {
-    const pr = proj.at(t); F.push({ x: pr * u.x + Dx, y: pr * u.y + Dy });
-    const w = windAt(prof, Math.max(sol.hOpen, sol.hRel - proj.zAt(t + dt / 2))); Dx += w.u * dt; Dy += w.v * dt;
-  }
-  for (let D = 1; D <= 60; D += 0.25) {
-    const dk = D / dt, tMax = Math.max(0, Tff - D); let ok = true;
-    for (let t = 0; t <= tMax + 1e-9 && ok; t += dt) {
-      const i = Math.round(t / dt), j = i + dk, a = F[Math.min(F.length - 1, Math.floor(j))], b = F[Math.min(F.length - 1, Math.ceil(j))], fj = j - Math.floor(j);
-      const ex = D * Vg * u.x - ((a.x * (1 - fj) + b.x * fj) - F[i].x), ey = D * Vg * u.y - ((a.y * (1 - fj) + b.y * fj) - F[i].y);
-      if (Math.hypot(ex, ey) < sep) ok = false;
-    }
-    if (ok) { D = Math.ceil(D - 1e-9); const sp = Vg * D; return { n: Math.floor(sol.length / sp + 1e-6) + 1, dt: D, s: sp, Vg, sep }; } // en secondes entières, arrondi au-dessus
-  }
-  return { n: 1, dt: null, s: null, Vg, sep };
+// Nombre de sorties sur le vecteur. Deux paras qui sortent à D secondes d'intervalle ont la même projection et traversent
+// les mêmes vents aux mêmes hauteurs : une fois la projection finie, et donc à l'ouverture, ils sont séparés de D × vitesse sol
+// de l'avion. Intervalle = séparation ÷ vitesse sol (règle pratique), arrondi à la seconde au-dessus.
+// (Avant v0.9.1 : on exigeait la séparation dès la sortie, pendant la projection du premier → 13 s au lieu de 7 s par vent nul.)
+function exitsOn(sol, prof, p) {
+  const sep = +p.sep || 300, u = sol.u, wr = windAt(prof, sol.hRel), Vg = sol.tas + wr.u * u.x + wr.v * u.y; // vitesse sol le long de l'axe
+  if (!(Vg > 3)) return { n: 1, dt: null, s: null, Vg, sep };
+  const D = Math.ceil(sep / Vg - 1e-9), sp = Vg * D;
+  return { n: Math.floor(sol.length / sp + 1e-6) + 1, dt: D, s: sp, Vg, sep };
 }
 function solve(z, prof, rec) {
   const p = z.params, elev = elevOf(z, rec), out = { ok: false };
