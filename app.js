@@ -4,7 +4,7 @@ window.addEventListener('error', e => {
   const t = document.getElementById('toast');
   if (t) { t.textContent = 'Erreur : ' + (e.message || 'inconnue') + ' — ferme et rouvre l\'appli'; t.classList.remove('hidden'); }
 });
-const VERSION = '0.2.1';
+const VERSION = '0.2.2';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -128,7 +128,7 @@ const store = {
   del(k) { try { localStorage.removeItem(k); } catch (e) {} }
 };
 const clone = o => JSON.parse(JSON.stringify(o));
-const SHOW_DEFAULT = { relax: true, traj: true };
+const SHOW_DEFAULT = { relax: true };
 function upgrade(z) {
   if (!z) return z;
   z.params = Object.assign({}, DEFAULT_PARAMS, z.params || {});
@@ -246,7 +246,11 @@ function solve(z, prof, rec) {
     }
     Rt[d] = Math.max(0, dist);
   }
+  // Borne physique : quel que soit le cap tenu, on ne peut pas faire mieux que le cercle (dérive sous voile + Vh × temps).
+  // Elle évite de compter une route directe intenable quand le vent de travers dépasse la vitesse propre.
+  const D2 = driftBetween(prof, h2, hMin, +p.vz), R2 = Va * (h2 - hMin) / (+p.vz);
   const reach = (qx, qy) => { // depuis le point local q (début de la navigation), peut-on rejoindre le PRV ?
+    if (Math.hypot(qx + D2.x, qy + D2.y) > R2) return false;
     const d = Math.hypot(qx, qy); if (d < 1) return true;
     const b = n360(Math.atan2(-qx, -qy) * 180 / Math.PI), i = Math.floor(b), f = b - i;
     return d <= Rt[i] * (1 - f) + Rt[i + 1] * f;
@@ -258,53 +262,61 @@ function solve(z, prof, rec) {
   // Vent moyen sous voile (de la fin des 15 s jusqu'à l'arrivée au PRV), pour l'explication
   let cu = 0, cv = 0, cn = 0; for (let h = h2; h > hMin; h -= DH) { const w = windAt(prof, h); cu += w.u; cv += w.v; cn++; }
   const canopyWind = spdDir({ u: cu / Math.max(cn, 1), v: cv / Math.max(cn, 1) });
+  const dC = driftBetween(prof, h1, hMin, +p.vz);
+  out.relax = { c: { x: -(dFF.x + dC.x), y: -(dFF.y + dC.y) }, R: Va * (h1 - hMin) / (+p.vz) };
   Object.assign(out, { u, r, S, C0, Rs, inside, dFF, dP, Rmax, Rt, reach, canopyWind, h1, h2 });
   // Recherche du plus long segment parallèle à l'axe, entièrement dans la zone
   const step = 10;
-  const runOn = (o, tWant) => {
-    let best = null, start = null;
-    const base = { x: C0.x + o * r.x, y: C0.y + o * r.y }, n = Math.ceil(Rs / step);
+  // Segments de l'axe (décalé de o sur le côté) entièrement dans la zone ; tWant : le plus proche de ce point, sinon le plus long
+  const runOn = (o, tWant, st) => {
+    st = st || step;
+    let best = null, bd = Infinity, start = null;
+    const base = { x: C0.x + o * r.x, y: C0.y + o * r.y }, n = Math.ceil(Rs / st);
     for (let k = -n; k <= n + 1; k++) {
-      const t = k * step, inn = k <= n && inside(base.x + t * u.x, base.y + t * u.y);
+      const t = k * st, inn = k <= n && inside(base.x + t * u.x, base.y + t * u.y);
       if (inn && start === null) start = t;
       if (!inn && start !== null) {
-        const seg = { a: start, b: t - step };
-        if (tWant != null ? (tWant >= seg.a - step && tWant <= seg.b + step) : (!best || seg.b - seg.a > best.b - best.a)) best = seg;
+        const seg = { a: start, b: t - st, st };
+        if (tWant != null) { const d = tWant < seg.a ? seg.a - tWant : tWant > seg.b ? tWant - seg.b : 0; if (d < bd) { bd = d; best = seg; } }
+        else if (!best || seg.b - seg.a > best.b - best.a) best = seg;
         start = null;
       }
     }
     return best;
   };
   const refine = (o, seg) => { // bords au mètre près
-    const base = { x: C0.x + o * r.x, y: C0.y + o * r.y }, ins = t => inside(base.x + t * u.x, base.y + t * u.y);
+    const base = { x: C0.x + o * r.x, y: C0.y + o * r.y }, ins = t => inside(base.x + t * u.x, base.y + t * u.y), st = seg.st || step;
     const edge = (tin, tout) => { for (let k = 0; k < 12; k++) { const m = (tin + tout) / 2; if (ins(m)) tin = m; else tout = m; } return tin; };
-    return { a: edge(seg.a, seg.a - step), b: edge(seg.b, seg.b + step) };
+    return { a: edge(seg.a, seg.a - st), b: edge(seg.b, seg.b + st) };
   };
   let bo = null, bs = null;
   if (typeof z.offsetManual === 'number') { // vecteur placé à la main : décalage latéral mémorisé par rapport au PRV
     const o = z.offsetManual - (C0.x * r.x + C0.y * r.y);
     const tw = typeof z.tManual === 'number' ? z.tManual - (C0.x * u.x + C0.y * u.y) : null;
-    const s = runOn(o, tw) || runOn(o, null); if (s) { bo = o; bs = s; }
+    const s = runOn(o, tw);
+    if (s) { bo = o; bs = s; }
+    else { // déplacé hors de la zone : on le bloque sur le bord le plus proche, quitte à le réduire à un point
+      const n = Math.ceil(2 * Rs / step); let oin = null, oout = o;
+      for (let k = 1; k <= n && oin === null; k++) for (const sg of [1, -1]) { const oo = o + sg * k * step; if (runOn(oo, null)) { oin = oo; oout = oo - sg * step; break; } }
+      if (oin !== null) {
+        let a = oin, b = oout;
+        for (let k = 0; k < 12; k++) { const m = (a + b) / 2; if (runOn(m, null, 1)) a = m; else b = m; }
+        bo = a; bs = runOn(a, tw, 1) || runOn(oin, tw); if (!runOn(a, tw, 1)) bo = oin;
+      }
+    }
   } else {
     const n = Math.ceil(Rs / step);
     for (let k = -n; k <= n; k++) { const s = runOn(k * step, null); if (s && (!bs || s.b - s.a > bs.b - bs.a)) { bs = s; bo = k * step; } }
   }
-  if (!bs || bs.b - bs.a < 1) { out.err = 'Aucun point de largage ne permet de rejoindre le PRV à ' + hMin + ' m avec ces vents.'; out.ok = false; return out; }
+  if (!bs) { out.err = 'Aucun point de largage ne permet de rejoindre le PRV à ' + hMin + ' m avec ces vents.'; out.ok = false; return out; }
   const seg = refine(bo, bs), base = { x: C0.x + bo * r.x, y: C0.y + bo * r.y };
   const A = { x: base.x + seg.a * u.x, y: base.y + seg.a * u.y }, B = { x: base.x + seg.b * u.x, y: base.y + seg.b * u.y };
   out.start = Geo.fromLocal(ch.prv, A); out.end = Geo.fromLocal(ch.prv, B); out.length = seg.b - seg.a;
+  out.offsetUsed = bo + (C0.x * r.x + C0.y * r.y); out.tUsed = (seg.a + seg.b) / 2 + (C0.x * u.x + C0.y * u.y);
   out.ok = true; return out;
 }
-// Trajectoire depuis un point de largage : largage → ouverture → fin des 15 s (meilleur côté) → PRV
-function trajOf(sol, ll) {
-  const A = Geo.toLocal(sol.prv, ll), O = { x: A.x + sol.dFF.x, y: A.y + sol.dFF.y };
-  let best = null, bm = -Infinity;
-  sol.S.forEach(S => { const q = { x: A.x + S.x, y: A.y + S.y }, d = Math.hypot(q.x, q.y), b = n360(Math.atan2(-q.x, -q.y) * 180 / Math.PI), i = Math.floor(b), f = b - i;
-    const m = sol.Rt[i] * (1 - f) + sol.Rt[Math.min(i + 1, 360)] * f - d; if (m > bm) { bm = m; best = q; } });
-  return { pts: [ll, Geo.fromLocal(sol.prv, O), Geo.fromLocal(sol.prv, best), { lat: sol.prv.lat, lng: sol.prv.lng }], drift: Math.hypot(sol.dFF.x, sol.dFF.y), margin: bm };
-}
-// Contour de la zone de relaxation (union des deux côtés), par rayons depuis son centre
-function relaxPolygon(sol) {
+// Zone réelle de largage (avec les 15 s perpendiculaires, union des deux côtés) : « patatoïde », par rayons depuis son centre
+function patatoidPolygon(sol) {
   if (!sol || !sol.inside) return null;
   const pts = [], c = sol.C0, st = 10;
   for (let a = 0; a < 360; a += 2) {
@@ -316,6 +328,13 @@ function relaxPolygon(sol) {
     pts.push(Geo.fromLocal(sol.prv, { x: c.x + tin * e.x, y: c.y + tin * e.y }));
   }
   return pts.length > 10 ? pts : null;
+}
+// Cercle de relaxation (affichage) : sans les 15 s perpendiculaires, c'est un vrai cercle
+function relaxPolygon(sol) {
+  if (!sol || !sol.relax) return null;
+  const c = sol.relax.c, R = sol.relax.R, pts = [];
+  for (let a = 0; a < 360; a += 3) pts.push(Geo.fromLocal(sol.prv, { x: c.x + R * Math.sin(a * Math.PI / 180), y: c.y + R * Math.cos(a * Math.PI / 180) }));
+  return pts;
 }
 
 // ---------- Carte ----------
@@ -352,7 +371,7 @@ const fig = L.layerGroup().addTo(map);
 const grads = L.layerGroup().addTo(map);
 let placing = null, posMarker = null; // placing : null | 'P' (PRV)
 const prvMarkers = {};
-let solKey = '', sol = null, prof = null, wxRec = null, relaxPts = null, relaxKey = '';
+let patPts = null, solKey = '', sol = null, prof = null, wxRec = null, relaxPts = null, relaxKey = '';
 
 function dotIcon(color, size, label, cls) {
   return L.divIcon({
@@ -395,16 +414,10 @@ function draw(light) {
   if (sol.ok) {
     if (current.show.relax) {
       const key = [current.when, sol.heading, sol.prv.id, JSON.stringify(current.params), sol.elev, wxRec && wxRec.fetched].join('|');
-      if (!light && key !== relaxKey) { relaxPts = relaxPolygon(sol); relaxKey = key; }
-      if (relaxPts) L.polygon(relaxPts.map(LL), { color: C_RELAX, weight: 2, dashArray: '6 5', fillColor: C_RELAX, fillOpacity: .08, interactive: false }).addTo(fig);
+      if (!light && key !== relaxKey) { relaxPts = relaxPolygon(sol); patPts = patatoidPolygon(sol); relaxKey = key; }
+      if (relaxPts) L.polygon(relaxPts.map(LL), { color: C_RELAX, weight: 2.5, fillColor: C_RELAX, fillOpacity: .08, smoothFactor: 0, interactive: false }).addTo(fig);
+      if (patPts) L.polygon(patPts.map(LL), { color: C_RELAX, weight: 2, dashArray: '6 5', fill: false, smoothFactor: 0, interactive: false }).addTo(fig);
     }
-    if (current.show.traj) [sol.start, sol.end].forEach((pt, k) => { // trajectoires depuis les deux bouts du vecteur
-      const T = trajOf(sol, pt), P = T.pts.map(LL);
-      L.polyline([P[0], P[1]], { color: '#fff', weight: 2.5, dashArray: '2 6', interactive: false }).addTo(fig);
-      L.polyline([P[1], P[2]], { color: '#ff8c00', weight: 3, interactive: false }).addTo(fig);
-      L.polyline([P[2], P[3]], { color: '#ffd400', weight: 2.5, dashArray: '8 6', opacity: .9, interactive: false }).addTo(fig);
-      L.marker(P[1], { interactive: false, zIndexOffset: 500, icon: dotIcon('#ffffff', 11, k ? '' : `ouverture · dérive ${fmtDist(T.drift)}`) }).addTo(fig);
-    });
     const a = LL(sol.start), b = LL(sol.end);
     L.polyline([a, b], { color: '#fff', weight: 10, opacity: .85, interactive: false }).addTo(fig);
     L.polyline([a, b], { color: '#000', weight: 5, interactive: false }).addTo(fig);
@@ -495,7 +508,7 @@ function placeMarkers() {
       const line = L.polyline([LL(sol.start), LL(sol.end)], { color: '#fff', weight: 30, opacity: 0, interactive: true, bubblingMouseEvents: true }).addTo(map);
       const handle = { _lpDragging: false, getElement: () => line._path, setLatLng: () => {} };
       vecHit = { line, handle };
-      longPressDrag(handle, ll => { setManualPoint(ll); draw(true); }, () => { persist(); redraw(); toast('Vecteur déplacé. « Vect. auto » (à gauche) pour revenir au meilleur placement.'); });
+      longPressDrag(handle, ll => { setManualPoint(ll); draw(true); }, () => { if (sol && sol.ok) { current.offsetManual = sol.offsetUsed; current.tManual = sol.tUsed; } persist(); redraw(); toast('Vecteur déplacé. « Vect. auto » (à gauche) pour revenir au meilleur placement.'); });
     } else if (!vecHit.handle._lpDragging) vecHit.line.setLatLngs([LL(sol.start), LL(sol.end)]);
     if (!map.hasLayer(vecHit.line)) vecHit.line.addTo(map);
     // Étiquette : cap magnétique et longueur ; appui long sur le cap = le modifier
@@ -512,8 +525,10 @@ function placeMarkers() {
 // Étiquette du vecteur posée à côté du trait (pas dessus), pour laisser le trait libre à l'appui long
 function labelPos() {
   const a = map.latLngToContainerPoint(LL(sol.start)), b = map.latLngToContainerPoint(LL(sol.end));
-  const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, L0 = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-  let px = -(b.y - a.y) / L0, py = (b.x - a.x) / L0; if (px < 0 || (px === 0 && py < 0)) { px = -px; py = -py; }
+  // direction de l'axe à l'écran (même si le vecteur est réduit à un point)
+  const ax = map.latLngToContainerPoint(LL(Geo.fromLocal(sol.start, { x: sol.u.x * 1000, y: sol.u.y * 1000 })));
+  const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, L0 = Math.hypot(ax.x - a.x, ax.y - a.y) || 1;
+  let px = -(ax.y - a.y) / L0, py = (ax.x - a.x) / L0; if (px < 0 || (px === 0 && py < 0)) { px = -px; py = -py; }
   const el = vecLabel && vecLabel.getElement() && vecLabel.getElement().querySelector('span');
   const w = el ? el.offsetWidth : 190, h = el ? el.offsetHeight : 34;
   const d = Math.abs(px) * w / 2 + Math.abs(py) * h / 2 + 12;
@@ -655,14 +670,13 @@ function syncQuick() {
   const p = current.params;
   $('qWhen').innerHTML = `🕑 ${fmtWhen(current.when)}`;
   $('qRel').innerHTML = sol && sol.flRel ? `FL${Math.round(sol.flRel)}<br>${fmtInt(p.hOpen)} m` : `FL${Math.round(p.relMode === 'FL' ? p.relFL : aglToFl(+p.relAGL, prof, elevOf(current, wxRec)))}<br>${fmtInt(p.hOpen)} m`;
-  $('qRelax').classList.toggle('on', !!current.show.relax); $('qTraj').classList.toggle('on', !!current.show.traj);
+  $('qRelax').classList.toggle('on', !!current.show.relax);
   $('qRev').classList.toggle('on', !!current.reversed);
   $('qPrv').textContent = current.prvManual ? 'PRV man.' : 'PRV auto'; $('qPrv').classList.toggle('on', !!current.prvManual);
   $('qVecAuto').classList.toggle('hidden', typeof current.offsetManual !== 'number');
   $('qWinds').classList.toggle('on', !$('windsBox').classList.contains('hidden'));
 }
 function quick(fn, msg) { fn(); syncQuick(); persist(); redraw(); if (msg) toast(msg()); }
-$('qTraj').addEventListener('click', () => quick(() => { current.show.traj = !current.show.traj; }, () => current.show.traj ? 'Trajectoires affichées : largage → ouverture (blanc) → 15 s (orange) → PRV (jaune)' : 'Trajectoires masquées'));
 $('qRelax').addEventListener('click', () => quick(() => { current.show.relax = !current.show.relax; }, () => current.show.relax ? 'Zone de relaxation affichée' : 'Zone de relaxation masquée'));
 $('qRev').addEventListener('click', () => quick(() => { current.reversed = !current.reversed; current.offsetManual = null; },
   () => current.reversed ? (current.axis.on && !current.axis.both ? '⚠️ Sens inversé : la zone n\'autorise pas cet axe dans ce sens' : 'Sens de l\'axe inversé') : 'Sens normal'));
@@ -731,7 +745,7 @@ $('t_plus').addEventListener('click', () => setTWhen(shiftWhen(tWhen, 1)));
 $('t_now').addEventListener('click', () => setTWhen(nowWhen()));
 $('t_date').addEventListener('change', e => { if (e.target.value) setTWhen(e.target.value + tWhen.slice(10)); });
 
-// ---------- Placement des PRV : en touchant la carte ou à ma position GPS ----------
+// ---------- Placement des PRV : en touchant la carte ----------
 function syncPlaceBtn() { $('btnPlaceP').classList.toggle('on', placing === 'P'); }
 function placeBanner() { setBanner(placing === 'P' ? 'Touche la carte pour placer le point de rendez-vous.' : null); }
 $('btnPlaceP').addEventListener('click', () => {
@@ -739,15 +753,6 @@ $('btnPlaceP').addEventListener('click', () => {
   if (!current.id) return toast('Crée ou ouvre d\'abord une zone');
   stopMeasure(); placing = 'P'; syncPlaceBtn(); placeBanner(); closeSheet();
 });
-function gpsHere(btn, then) {
-  if (!navigator.geolocation) return toast('Géolocalisation indisponible');
-  const old = btn.textContent; btn.textContent = '📡 Position…'; btn.disabled = true;
-  navigator.geolocation.getCurrentPosition(pos => {
-    btn.textContent = old; btn.disabled = false;
-    then({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-  }, () => { btn.textContent = old; btn.disabled = false; toast('Position refusée ou indisponible'); }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
-}
-$('btnGpsP').addEventListener('click', () => { if (!current.id) return toast('Crée ou ouvre d\'abord une zone'); gpsHere($('btnGpsP'), p => { closeSheet(); map.setView(LL(p), Math.max(map.getZoom(), 15)); addPrv(p); }); });
 
 // À l'ouverture d'une zone : vecteur déjà calculé → l'afficher ou mettre à jour à maintenant (et garder l'ancien ?)
 async function askOldVector() {
@@ -1237,7 +1242,7 @@ async function renderPdfCanvas() {
   // ---- Zone de relaxation, PRV, vecteur ----
   const poly = (pts, stroke, fill, w, dash) => { if (!pts || pts.length < 3) return; g.save(); g.beginPath(); pts.forEach((ll, i) => { const q = toC(ll); i ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y); }); g.closePath();
     if (fill) { g.fillStyle = fill; g.fill(); } g.strokeStyle = stroke; g.lineWidth = w * u; g.setLineDash(dash ? dash.map(d => d * u) : []); g.stroke(); g.restore(); };
-  if (current.show.relax) poly(relaxPolygon(sol), C_RELAX, 'rgba(0,229,255,.08)', 2.2, [8, 6]);
+  if (current.show.relax) { poly(relaxPolygon(sol), C_RELAX, 'rgba(0,229,255,.08)', 2.6); poly(patatoidPolygon(sol), C_RELAX, null, 2.2, [8, 6]); }
   const pv = current.prevVector;
   if (pv && current.show.prev !== false) { const a = toC(pv.start), b = toC(pv.end); g.save(); g.strokeStyle = '#bbb'; g.lineWidth = 3 * u; g.setLineDash([8 * u, 8 * u]); g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke(); g.restore(); shadowText(`ancien ${fmtWhen(pv.when)}`, b.x + 10 * u, b.y, '#ddd', 11); }
   current.prvs.forEach(p => { const used = sol.prv && p.id === sol.prv.id; const c = dot(p, used ? C_PRVUSED : C_PRV, used ? 10 : 7); shadowText(used ? 'PRV' : 'prv', c.x + 14 * u, c.y, used ? C_PRVUSED : '#9cf', used ? 14 : 11); });
