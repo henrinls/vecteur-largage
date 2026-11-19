@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.10.1';
+const VERSION = '0.11.0';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -138,7 +138,7 @@ const store = {
   del(k) { try { localStorage.removeItem(k); } catch (e) {} }
 };
 const clone = o => JSON.parse(JSON.stringify(o));
-const SHOW_DEFAULT = { relax: true, label: true, rose: false };
+const SHOW_DEFAULT = { relax: true, label: true, rose: false, nm: false };
 function upgrade(z) {
   if (!z) return z;
   z.params = Object.assign({}, DEFAULT_PARAMS, z.params || {});
@@ -209,10 +209,23 @@ const fmtNm = m => (Math.round(m / NM * 10) / 10).toFixed(1).replace('.', ',');
 const CARD8 = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'];
 const card8 = dirTrue => CARD8[Math.round(n360(dirTrue - declCur()) / 45) % 8]; // point cardinal ou demi-point le plus proche (en magnétique)
 const AU8 = { N: 'au N', NE: 'au NE', E: "à l'E", SE: 'au SE', S: 'au S', SO: 'au SO', O: "à l'O", NO: 'au NO' };
+// Cercles tous les 0,1 NM jusqu'à 2 NM autour du centre de la DZ (Henri) : pointillés pour les dixièmes,
+// trait plein pour 0,5 et 1,5, trait plus gras pour 1 et 2 ; valeur écrite sur chaque cercle aux 4 points cardinaux
+function nmRingStyle(k) { return k % 10 === 0 ? { w: 2.2, dash: null, op: .95 } : k % 5 === 0 ? { w: 1.4, dash: null, op: .9 } : { w: 1, dash: [3, 5], op: .7 }; }
+const nmLabel = k => (k % 10 === 0 ? String(k / 10) : (k / 10).toFixed(1).replace('.', ','));
+function nmRings() {
+  const c = current.dz, mpp = mPerPx(c), gap = 0.1 * NM / mpp; // écart entre deux cercles, en pixels
+  for (let k = 1; k <= 20; k++) {
+    const st = nmRingStyle(k), major = k % 5 === 0;
+    if (!major && gap < 5) continue; // trop serrés à ce zoom : seulement 0,5 / 1 / 1,5 / 2
+    L.circle(LL(c), { radius: k * 0.1 * NM, color: '#fff', weight: st.w, opacity: st.op, dashArray: st.dash ? st.dash.join(' ') : null, fill: false, interactive: false }).addTo(grads);
+    if (major || gap >= 14) [[0, 1], [1, 0], [0, -1], [-1, 0]].forEach(([dx, dy]) => L.marker(LL(Geo.fromLocal(c, { x: dx * k * 0.1 * NM, y: dy * k * 0.1 * NM })), { interactive: false, icon: L.divIcon({ className: 'nmlbl', iconSize: [0, 0], html: `<span>${nmLabel(k)}</span>` }) }).addTo(grads)); // valeur aux 4 points cardinaux
+  }
+}
 function dzText(sol) { // Henri : « 2,0 NM avant · décalé 0,2 NM au N », « Verticale · décalé 0,2 NM au N », « 0,5 NM après »
   const d = sol && sol.dzInfo; if (!d) return '';
-  const a = Math.abs(d.along) / NM < 0.05 ? 'Verticale' : `${fmtNm(Math.abs(d.along))} NM ${d.along >= 0 ? 'avant' : 'après'}`;
-  return d.lat / NM < 0.05 ? `${a} · plein axe` : `${a} · décalé ${fmtNm(d.lat)} NM ${AU8[card8(d.dir)]}`; // Henri : « 2,0 NM avant · plein axe », « Verticale · plein axe »
+  const a = Math.abs(d.along) / NM < 0.05 ? 'Verticale' : `${fmtNm(Math.abs(d.along))} ${d.along >= 0 ? 'avant' : 'après'}`; // en nautiques, sans l'unité (Henri)
+  return d.lat / NM < 0.05 ? `${a} · plein axe` : `${a} · décalé ${fmtNm(d.lat)} ${AU8[card8(d.dir)]}`; // Henri : « 2,0 NM avant · plein axe », « Verticale · plein axe »
 }
 function prvCentroid(z) { const P = z.prvs; return { lat: P.reduce((a, p) => a + p.lat, 0) / P.length, lng: P.reduce((a, p) => a + p.lng, 0) / P.length }; }
 function elevOf(z, rec) { return typeof z.elevManual === 'number' ? z.elevManual : (rec && typeof rec.elev === 'number' ? rec.elev : (typeof z.elevAuto === 'number' ? z.elevAuto : 0)); }
@@ -501,6 +514,7 @@ function draw(light) {
   if (typeof Photo !== 'undefined') Photo.sync();
   fig.clearLayers(); grads.clearLayers();
   compute();
+  if (current.show.nm && current.dz) nmRings();
   updateInfo(); syncQuick(); syncPlaceBtn(); syncJump(); fillInputs(true);
   if (placing) placeBanner();
   else if (!current.prvs.length) setBanner(current.id ? 'Place les points de rendez-vous : ☰ Zones → PRV → Toucher la carte.' : 'Pour commencer : ☰ → ＋ Nouvelle zone.');
@@ -830,7 +844,7 @@ function syncQuick() {
   const AC_SHORT = { pc6: 'PC-6', c208: 'Caravan', dhc6: 'Twin', cn235: 'CN235', a400: 'A400M' }, acT = AIRCRAFT[p.acType] && Math.round(p.acMs * KT) === AIRCRAFT[p.acType][1] ? AC_SHORT[p.acType] : `${Math.round(p.acMs * KT)} kt`;
   $('qWhen').innerHTML = `🕑 ${fmtWhen(current.when)}<br><b>FL${flQ}</b><br>ouv. ${fmtInt(p.hOpen)} m<br>✈ ${acT}`; // un seul bouton : date, heure, largage, ouverture
   $('qZero').classList.toggle('on', zeroWind);
-  $('qRelax').classList.toggle('on', !!current.show.relax); $('qLabel').classList.toggle('on', current.show.label !== false); $('qTicks').classList.toggle('on', !!current.show.rose);
+  $('qRelax').classList.toggle('on', !!current.show.relax); $('qLabel').classList.toggle('on', current.show.label !== false); $('qNm').classList.toggle('on', !!current.show.nm); $('qTicks').classList.toggle('on', !!current.show.rose);
   $('qRev').classList.toggle('on', !!current.reversed);
   $('qPrv').textContent = 'PRV auto'; $('qPrv').classList.toggle('hidden', !current.prvManual); // n'apparaît qu'après un choix manuel
   $('qVecAuto').classList.toggle('hidden', typeof current.offsetManual !== 'number');
@@ -838,6 +852,7 @@ function syncQuick() {
 }
 function quick(fn, msg) { fn(); syncQuick(); persist(); redraw(); if (msg) toast(msg()); }
 $('qLabel').addEventListener('click', () => quick(() => { current.show.label = current.show.label === false; }, () => current.show.label !== false ? 'Infos du vecteur affichées' : 'Infos du vecteur masquées'));
+$('qNm').addEventListener('click', () => { if (!current.dz) return toast('Place d\'abord le centre de la DZ (☰ Zones)'); quick(() => { current.show.nm = !current.show.nm; }, () => current.show.nm ? 'Cercles tous les 0,1 NM autour de la DZ' : 'Cercles NM masqués'); });
 $('qTicks').addEventListener('click', () => quick(() => { current.show.rose = !current.show.rose; }, () => current.show.rose ? 'Rosace en degrés magnétiques autour du vecteur' : 'Rosace masquée'));
 $('qRelax').addEventListener('click', () => quick(() => { current.show.relax = !current.show.relax; }, () => current.show.relax ? 'Zone de relaxation affichée' : 'Zone de relaxation masquée'));
 $('qRev').addEventListener('click', () => quick(() => { current.reversed = !current.reversed; current.offsetManual = null; },
@@ -1444,6 +1459,15 @@ async function renderPdfCanvas() {
     dot(sol.start, C_START, 9); dot(sol.end, C_END, 9); // même taille que les PRV, comme à l'écran
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, ne = sol.exits ? sol.exits.n : 1;
     /* PDF : jamais de cartouche sur la carte, tout est dans le bandeau d'informations */ }
+  if (current.show.nm && current.dz) { // cercles NM autour de la DZ, comme à l'écran (traits plus épais)
+    const c = toC(current.dz), pm = pxPerM(current.dz), gap = 0.1 * NM * pm / u;
+    for (let k = 1; k <= 20; k++) {
+      const st = nmRingStyle(k), major = k % 5 === 0; if (!major && gap < 5) continue;
+      g.save(); g.strokeStyle = '#fff'; g.globalAlpha = st.op; g.lineWidth = st.w * 1.8 * u; g.setLineDash(st.dash ? st.dash.map(d => d * 1.6 * u) : []);
+      g.beginPath(); g.arc(c.x, c.y, k * 0.1 * NM * pm, 0, 2 * Math.PI); g.stroke(); g.restore();
+      if (major || gap >= 14) [0, 90, 180, 270].forEach(dg => { const an = pageAngle(dg), rr = k * 0.1 * NM * pm; shadowText(nmLabel(k), c.x + rr * Math.sin(an), c.y - rr * Math.cos(an), '#fff', 11, 'center'); }); // aux 4 points cardinaux, comme à l'écran
+    }
+  }
   if (current.show.rose) { // rosace en degrés magnétiques
     const ro = roseOf(sol), c = toC(ro.c), Rr = ro.R * pxPerM(ro.c);
     g.save(); g.strokeStyle = '#fff'; g.globalAlpha = .85; g.lineWidth = 1.4 * u; g.setLineDash([4 * u, 6 * u]);
