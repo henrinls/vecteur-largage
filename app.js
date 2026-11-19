@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.9.2';
+const VERSION = '0.9.3';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -20,7 +20,7 @@ const BASEMAPS = {
 const TILE_CACHE = 'vl-tiles-v1';
 // Paramètres : les « hypothèses » (valeurs arbitraires, réglables) et les réglages d'utilisation (à chaque saut)
 const DEFAULT_PARAMS = {
-  vff: 50, openLoss: 100, perpTime: 15, vz: 4, glide: 2.5, hMin: 300, margin: 20, sep: 300,   // hypothèses (margin : marge de sécurité en % ; sep : séparation mini entre sorties, m)
+  vff: 50, openLoss: 100, perpTime: 15, vz: 4, glide: 2.5, hMin: 300, margin: 0, sep: 300,    // hypothèses (margin : toujours 0 depuis v0.9.3, option retirée ; sep : séparation mini entre sorties, m)
   acMs: 36.0, acType: 'pc6',                                             // avion et vitesse de largage, badin (m/s ; 70 kt : Pilatus PC-6)
   hOpen: 1000, relMode: 'FL', relFL: 140, relAGL: 4000                   // utilisation
 };
@@ -165,6 +165,7 @@ if (current.target || current.gateA) current = newZone(null);
 // ---------- Paramètres communs à toutes les zones ----------
 let profile = store.get('vl.profile', null) || {};
 PROFILE_KEYS.forEach(k => { if (profile[k] === undefined) profile[k] = DEFAULT_PARAMS[k]; });
+profile.margin = 0; // option « marge » retirée (v0.9.3) : toujours 0
 if (profile.acMs === 41.2) profile.acMs = DEFAULT_PARAMS.acMs; // ancien défaut 80 kt → 70 kt (v0.4.5)
 if (!store.get('vl.mig.hOpen', false)) { if (+profile.hOpen === 1500) profile.hOpen = 1000; store.set('vl.mig.hOpen', true); } // ancien défaut 1 500 m → 1 000 m (v0.8.0), une seule fois
 Object.keys(profile).forEach(k => { if (!PROFILE_KEYS.includes(k)) delete profile[k]; });
@@ -715,10 +716,9 @@ function updateInfo() {
   } else if (sol && sol.err) t = sol.err;
   $('axisInfo').textContent = t;
   const ex = sol && sol.ok && sol.exits;
-  $('whyInfo').innerHTML = sol && sol.ok ? (ex && ex.dt ? `<b>${ex.n} sortie${ex.n > 1 ? 's' : ''}</b> : une toutes les <b>${fmt1(ex.dt)} s</b> (${fmtInt(ex.s)} m au sol, vitesse sol de l'avion ${Math.round(ex.Vg * KT)} kt) pour rester à ${ex.sep} m les uns des autres. ` : '') +
-    `${acName()} : ${Math.round(sol.tas * KT)} kt de vitesse vraie à FL${Math.round(sol.flRel)} (${Math.round(current.params.acMs * KT)} kt badin). Chute libre de ${Math.round(sol.Tff)} s jusqu'à ${fmtInt(sol.hOpen)} m sol (${Math.round(sol.z10)} m les 10 premières secondes, le temps d'accélérer), puis ouverture en ${fmt1(sol.tOpen)} s (freinage de ${current.params.vff} à ${current.params.vz} m/s sur ${current.params.openLoss} m) : projection ${fmtInt(sol.throwDist)} m + dérive, au total <b>${fmtDist(Math.hypot(sol.dFF.x, sol.dFF.y))}</b> vers le ${hdg(n360(Math.atan2(sol.dFF.x, sol.dFF.y) * 180 / Math.PI))}. ` +
-    `${sol.lastExtra > 0.5 ? `Le dernier para ne fait pas les 15 s perpendiculaires : vecteur allongé de ${fmtInt(sol.lastExtra)} m à la fin. ` : ''}Sous voile : vent moyen <b>${Math.round(sol.canopyWind.spd * KT)} kt</b> pour ${Math.round(sol.Va * KT)} kt de vitesse propre` +
-    (sol.canopyWind.spd >= sol.Va ? ' <b class="warn">→ tu ne remontes pas au vent : il faut ouvrir au vent du PRV.</b>' : '.') : '';
+  // Panneau 🕑 volontairement court (Henri, 19/11/2026) : nombre de sorties et alerte vent sous voile ; le détail est dans l'onglet Zones (axisInfo)
+  $('whyInfo').innerHTML = sol && sol.ok ? (ex && ex.dt ? `<b>${ex.n} sortie${ex.n > 1 ? 's' : ''}</b>, une toutes les <b>${ex.dt} s</b>.` : '') +
+    (sol.canopyWind.spd >= sol.Va ? ' <b class="warn">Vent sous voile plus fort que la voile : ouvrir au vent du PRV.</b>' : '') : '';
   $('elevAuto').textContent = typeof current.elevAuto === 'number' ? `automatique : ${current.elevAuto} m` : 'automatique : inconnue (pas encore de prévision)';
 }
 
@@ -730,7 +730,7 @@ function setBanner(t) { const b = $('banner'); if (!t) b.classList.add('hidden')
 let toastT;
 function toast(t) { const el = $('toast'); el.textContent = t; el.classList.remove('hidden'); clearTimeout(toastT); toastT = setTimeout(() => el.classList.add('hidden'), 3200); }
 const numIn = el => parseFloat(String(el.value).replace(',', '.'));
-const HYP = ['vff', 'openLoss', 'perpTime', 'vz', 'glide', 'hMin', 'margin', 'sep'];
+const HYP = ['vff', 'openLoss', 'perpTime', 'vz', 'glide', 'hMin', 'sep'];
 function setParam(k, v) { current.params[k] = v; profile[k] = v; store.set('vl.profile', profile); zones.forEach(applyProfile); store.set('vl.zones', zones); }
 function fillInputs(only) {
   const p = current.params;
@@ -811,7 +811,7 @@ $('qVecAuto').addEventListener('click', () => quick(() => { current.offsetManual
 function syncJump() {
   if (document.activeElement !== $('j_date')) $('j_date').value = current.when.slice(0, 10);
   $('j_hour').value = current.when.slice(11, 13);
-  $('wxInfo').innerHTML = (current.holdWx ? `<b class="warn">Vecteur gardé du ${fmtWhen(current.when)}</b> · « Maintenant » pour le mettre à jour.<br>` : '') + wxStatus(wxRec, current.when);
+  $('wxInfo').innerHTML = (current.holdWx ? `<b class="warn">Vecteur gardé du ${fmtWhen(current.when)}</b><br>` : '') + wxStatus(wxRec, current.when);
 }
 const fmtFetched = ts => { const d = new Date(ts); return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)} à ${pad2(d.getHours())}h${pad2(d.getMinutes())}`; };
 const wxFailed = {}; // jour → dernier téléchargement raté
@@ -819,7 +819,7 @@ function wxStatus(rec, when) {
   if (!rec) return navigator.onLine === false || wxFailed[when.slice(0, 10)] ? '⚠️ Pas de réseau et aucune prévision gardée pour ce jour.' : 'Prévision en cours de téléchargement…';
   const st = fmtFetched(rec.fetched);
   const ok = (rec.hourly.time || []).includes(when);
-  return `${rec.model} · prévision téléchargée le ${st}${Date.now() - rec.fetched > 3 * 3600e3 ? ' <b class="warn">(ancienne : mets à jour si tu as du réseau)</b>' : ''}${ok ? '' : ' <b class="warn">(pas de donnée à cette heure)</b>'}`;
+  return `${rec.model.split(' (')[0]} · prévision du ${st}${Date.now() - rec.fetched > 3 * 3600e3 ? ' <b class="warn">(ancienne : mets à jour si tu as du réseau)</b>' : ''}${ok ? '' : ' <b class="warn">(pas de donnée à cette heure)</b>'}`;
 }
 let wxBusy = false;
 async function ensureWx(force, date) {
@@ -1435,7 +1435,7 @@ async function renderPdfCanvas() {
     (zeroWind ? 'TEST VENT FORCÉ À 0 · ' : '') + `Vent de largage : ${hdg(sol.windRel.dir)} ${Math.round(sol.windRel.spd * KT)} kt (${fmt1(sol.windRel.spd)} m/s) · ${acName()} ${Math.round(p.acMs * KT)} kt badin (${Math.round(sol.tas * KT)} kt vraie)`,
     `Chute ${p.vff} m/s · perte à l'ouverture ${p.openLoss} m`,
     `${p.perpTime} s perpendiculaire (sauf le dernier) · Vz ${fmt1(+p.vz)} m/s · finesse ${fmt1(+p.glide)}`,
-    `Arrivée au PRV à ${p.hMin} m minimum · marge de sécurité ${sol.margin} % · terrain ${Math.round(sol.elev)} m`,
+    `Arrivée au PRV à ${p.hMin} m minimum · terrain ${Math.round(sol.elev)} m`,
     `Déclinaison ${fmt1(sol.decl)}° · vents détaillés en page 2`
   ].forEach((s2, i) => tx(s2, col2, l0 + i * lh, '#eee'));
   tx(`${BASEMAPS[basemap].attr} · prévision ${wxRec ? wxRec.model : ''} via Open-Meteo · vecteur-largage v${VERSION}`, W - 20 * u, H - 10 * u, '#888', 8, false, 'right');
