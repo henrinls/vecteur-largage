@@ -4,7 +4,7 @@ window.addEventListener('error', e => {
   const t = document.getElementById('toast');
   if (t) { t.textContent = 'Erreur : ' + (e.message || 'inconnue') + ' — ferme et rouvre l\'appli'; t.classList.remove('hidden'); }
 });
-const VERSION = '0.4.0';
+const VERSION = '0.4.1';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -540,7 +540,7 @@ function longPressDrag(marker, onMove, onEnd, onStart) {
 }
 // ---------- PRV, vecteur et son étiquette ----------
 function prvIcon(used) {
-  return L.divIcon({ className: 'prv' + (used ? ' used' : ''), iconSize: [36, 36], iconAnchor: [18, 18], html: '<span></span>' });
+  return L.divIcon({ className: 'prv' + (used ? ' used' : ''), iconSize: [24, 24], iconAnchor: [12, 12], html: '<span></span>' });
 }
 // Appui long sans glisser → action (ex. menu d'un PRV)
 function longPressAction(m, cb) {
@@ -1339,7 +1339,7 @@ async function renderPdfCanvas() {
   if (current.show.relax) { poly(relaxPolygon(sol), C_RELAX, 'rgba(0,229,255,.08)', 2.6); poly(patatoidPolygon(sol), C_RELAX, null, 2.2, [8, 6]); }
   const pv = current.prevVector;
   if (pv && current.show.prev !== false) { const a = toC(pv.start), b = toC(pv.end); g.save(); g.strokeStyle = '#bbb'; g.lineWidth = 3 * u; g.setLineDash([8 * u, 8 * u]); g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke(); g.restore(); shadowText(`ancien ${fmtWhen(pv.when)}`, b.x + 10 * u, b.y, '#ddd', 11); }
-  current.prvs.forEach(p => { const used = sol.prv && p.id === sol.prv.id; dot(p, used ? C_PRVUSED : C_PRV, used ? 12 : 7); });
+  current.prvs.forEach(p => { const used = sol.prv && p.id === sol.prv.id; g.save(); g.globalAlpha = used ? 1 : 0.5; dot(p, used ? C_PRVUSED : C_PRV, 6); g.restore(); });
   { const a = toC(sol.start), b = toC(sol.end);
     g.save(); g.lineCap = 'round'; g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 10 * u; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
     g.strokeStyle = '#000'; g.lineWidth = 5 * u; g.stroke(); g.restore();

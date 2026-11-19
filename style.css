@@ -116,8 +116,8 @@ button.danger{border-color:#a33;color:#ff8a8a}
 .calbtns{display:flex;gap:8px;margin-top:8px}.calbtns button{flex:1;padding:12px}
 /* ---------- vecteur-largage ---------- */
 .prv{-webkit-touch-callout:none;user-select:none}
-.prv span{position:absolute;left:9px;top:9px;width:18px;height:18px;border-radius:50%;background:#ffd400;border:2px solid #111;box-shadow:0 0 0 1.5px rgba(255,255,255,.8)}
-.prv.used span{left:1px;top:1px;width:34px;height:34px;background:#ff8c00;border:3px solid #111;box-shadow:0 0 0 2px #fff,0 0 12px 3px rgba(255,140,0,.85)}
+.prv span{position:absolute;left:5px;top:5px;width:14px;height:14px;border-radius:50%;background:#ffd400;border:2px solid #111;opacity:.5}
+.prv.used span{background:#ff8c00;opacity:1;box-shadow:0 0 0 1.5px #fff}
 .vlabel{-webkit-touch-callout:none;user-select:none}
 .vlabel span{position:absolute;transform:translate(-50%,-50%);white-space:nowrap;background:rgba(0,0,0,.82);color:#fff;font-weight:800;font-size:15px;padding:5px 10px;border-radius:9px;border:2px solid #fff}
 .vlabel .vcap{color:#ffd400}
