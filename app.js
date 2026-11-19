@@ -4,7 +4,7 @@ window.addEventListener('error', e => {
   const t = document.getElementById('toast');
   if (t) { t.textContent = 'Erreur : ' + (e.message || 'inconnue') + ' — ferme et rouvre l\'appli'; t.classList.remove('hidden'); }
 });
-const VERSION = '0.2.4';
+const VERSION = '0.2.5';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -14,10 +14,10 @@ const BASEMAPS = {
 const TILE_CACHE = 'vl-tiles-v1';
 // Paramètres : les « hypothèses » (valeurs arbitraires, réglables) et les réglages d'utilisation (à chaque saut)
 const DEFAULT_PARAMS = {
-  vff: 50, openLoss: 100, perpTime: 15, vz: 4, glide: 2.5, hMin: 300,   // hypothèses
+  vff: 50, openLoss: 100, perpTime: 15, vz: 4, glide: 2.5, hMin: 300, margin: 20,   // hypothèses (margin : marge de sécurité en %)
   hOpen: 1500, relMode: 'FL', relFL: 140, relAGL: 4000                   // utilisation
 };
-const PROFILE_KEYS = ['vff', 'openLoss', 'perpTime', 'vz', 'glide', 'hMin', 'hOpen', 'relMode', 'relFL', 'relAGL'];
+const PROFILE_KEYS = ['vff', 'openLoss', 'perpTime', 'vz', 'glide', 'hMin', 'margin', 'hOpen', 'relMode', 'relFL', 'relAGL'];
 const C_START = '#1ec83c', C_END = '#ff2020', C_PRV = '#ffd400', C_PRVUSED = '#ff8c00', C_RELAX = '#00e5ff';
 const isDark = c => c === '#000000';
 const KT = 1.943844; // m/s → nœuds
@@ -255,14 +255,18 @@ function solve(z, prof, rec) {
     const b = n360(Math.atan2(-qx, -qy) * 180 / Math.PI), i = Math.floor(b), f = b - i;
     return d <= Rt[i] * (1 - f) + Rt[i + 1] * f;
   };
-  const inside = (x, y) => reach(x + S[0].x, y + S[0].y) || reach(x + S[1].x, y + S[1].y);
+  const insideRaw = (x, y) => reach(x + S[0].x, y + S[0].y) || reach(x + S[1].x, y + S[1].y);
   let Rmax = 0; for (let d = 0; d < 360; d++) Rmax = Math.max(Rmax, Rt[d]);
   // La zone de largage tient dans le cercle de relaxation (sans les 15 s) : on cherche autour de son centre.
   // (Avant : centre = simple dérive en chute, sans la dérive sous voile → par vent fort il tombait hors de la zone
   //  et le contour en pointillés était faux, coupé par un trait droit.)
   const dC = driftBetween(prof, h1, hMin, +p.vz);
   out.relax = { c: { x: -(dFF.x + dC.x), y: -(dFF.y + dC.y) }, R: Va * (h1 - hMin) / (+p.vz) };
+  // Marge de sécurité : cercle et zone réduits de x % autour du même centre → vecteur raccourci d'autant, surtout aux deux bouts
+  const k = Math.min(1, Math.max(0.05, 1 - (+p.margin || 0) / 100));
+  out.relax.R *= k; out.margin = Math.round((1 - k) * 100);
   const C0 = out.relax.c, Rs = out.relax.R + 100;
+  const inside = (x, y) => insideRaw(C0.x + (x - C0.x) / k, C0.y + (y - C0.y) / k);
   // Vent moyen sous voile (de la fin des 15 s jusqu'à l'arrivée au PRV), pour l'explication
   let cu = 0, cv = 0, cn = 0; for (let h = h2; h > hMin; h -= DH) { const w = windAt(prof, h); cu += w.u; cv += w.v; cn++; }
   const canopyWind = spdDir({ u: cu / Math.max(cn, 1), v: cv / Math.max(cn, 1) });
@@ -629,7 +633,7 @@ function setBanner(t) { const b = $('banner'); if (!t) b.classList.add('hidden')
 let toastT;
 function toast(t) { const el = $('toast'); el.textContent = t; el.classList.remove('hidden'); clearTimeout(toastT); toastT = setTimeout(() => el.classList.add('hidden'), 3200); }
 const numIn = el => parseFloat(String(el.value).replace(',', '.'));
-const HYP = ['vff', 'openLoss', 'perpTime', 'vz', 'glide', 'hMin'];
+const HYP = ['vff', 'openLoss', 'perpTime', 'vz', 'glide', 'hMin', 'margin'];
 function setParam(k, v) { current.params[k] = v; profile[k] = v; store.set('vl.profile', profile); zones.forEach(applyProfile); store.set('vl.zones', zones); }
 function fillInputs(only) {
   const p = current.params;
@@ -1286,7 +1290,7 @@ async function renderPdfCanvas() {
     `Vent de largage : ${hdg(sol.windRel.dir)} ${Math.round(sol.windRel.spd * KT)} kt (${fmt1(sol.windRel.spd)} m/s)`,
     `Chute ${p.vff} m/s · perte à l'ouverture ${p.openLoss} m`,
     `${p.perpTime} s perpendiculaire · Vz ${fmt1(+p.vz)} m/s · finesse ${fmt1(+p.glide)}`,
-    `Arrivée au PRV à ${p.hMin} m minimum · terrain ${Math.round(sol.elev)} m`,
+    `Arrivée au PRV à ${p.hMin} m minimum · marge de sécurité ${sol.margin} % · terrain ${Math.round(sol.elev)} m`,
     `Déclinaison ${fmt1(sol.decl)}° · vents détaillés en page 2`
   ].forEach((s2, i) => tx(s2, col2, l0 + i * lh, '#eee'));
   tx(`${BASEMAPS[basemap].attr} · prévision ${wxRec ? wxRec.model : ''} via Open-Meteo · vecteur-largage v${VERSION}`, W - 20 * u, H - 10 * u, '#888', 8, false, 'right');
