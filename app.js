@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.9.5';
+const VERSION = '0.9.6';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -794,7 +794,7 @@ $('z_elev').addEventListener('change', e => { const raw = e.target.value.trim();
 function syncQuick() {
   const p = current.params;
   const flQ = sol && sol.flRel ? Math.round(sol.flRel) : Math.round(p.relMode === 'FL' ? p.relFL : aglToFl(+p.relAGL, prof, elevOf(current, wxRec)));
-  const AC_SHORT = { pc6: 'PC-6', c208: 'Caravan', dhc6: 'Twin Otter', cn235: 'CN235', a400: 'A400M' }, acT = AIRCRAFT[p.acType] && Math.round(p.acMs * KT) === AIRCRAFT[p.acType][1] ? AC_SHORT[p.acType] : `${Math.round(p.acMs * KT)} kt`;
+  const AC_SHORT = { pc6: 'PC-6', c208: 'Caravan', dhc6: 'Twin', cn235: 'CN235', a400: 'A400M' }, acT = AIRCRAFT[p.acType] && Math.round(p.acMs * KT) === AIRCRAFT[p.acType][1] ? AC_SHORT[p.acType] : `${Math.round(p.acMs * KT)} kt`;
   $('qWhen').innerHTML = `🕑 ${fmtWhen(current.when)}<br><b>FL${flQ}</b><br>ouv. ${fmtInt(p.hOpen)} m<br>✈ ${acT}`; // un seul bouton : date, heure, largage, ouverture
   $('qZero').classList.toggle('on', zeroWind);
   $('qRelax').classList.toggle('on', !!current.show.relax); $('qLabel').classList.toggle('on', current.show.label !== false); $('qTicks').classList.toggle('on', !!current.show.rose);
