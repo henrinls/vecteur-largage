@@ -4,7 +4,7 @@ window.addEventListener('error', e => {
   const t = document.getElementById('toast');
   if (t) { t.textContent = 'Erreur : ' + (e.message || 'inconnue') + ' — ferme et rouvre l\'appli'; t.classList.remove('hidden'); }
 });
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -251,7 +251,7 @@ function exitsOn(sol, prof, p, proj) {
       const ex = D * Vg * u.x - ((a.x * (1 - fj) + b.x * fj) - F[i].x), ey = D * Vg * u.y - ((a.y * (1 - fj) + b.y * fj) - F[i].y);
       if (Math.hypot(ex, ey) < sep) ok = false;
     }
-    if (ok) { const sp = Vg * D; return { n: Math.floor(sol.length / sp + 1e-6) + 1, dt: D, s: sp, Vg, sep }; }
+    if (ok) { D = Math.ceil(D - 1e-9); const sp = Vg * D; return { n: Math.floor(sol.length / sp + 1e-6) + 1, dt: D, s: sp, Vg, sep }; } // en secondes entières, arrondi au-dessus
   }
   return { n: 1, dt: null, s: null, Vg, sep };
 }
@@ -577,7 +577,8 @@ function placeMarkers() {
     // Étiquette : cap magnétique et longueur ; appui long sur le cap = le modifier
     const mid = labelPos();
     const ne = sol.exits ? sol.exits.n : 1;
-    const html = `<span><b class="vcap">${hdg(sol.heading - sol.decl)} M</b> · ${fmtInt(sol.length)} m · <b class="vexits">${ne} sortie${ne > 1 ? 's' : ''}</b></span>`;
+    const dtx = sol.exits && sol.exits.dt ? ` · <b class="vexits">${fmt1(sol.exits.dt)} s</b>` : '';
+    const html = `<span><b class="vcap">${hdg(sol.heading - sol.decl)} M</b> · ${fmtInt(sol.length)} m · <b class="vexits">${ne} sortie${ne > 1 ? 's' : ''}</b>${dtx}</span>`;
     if (!vecLabel) { vecLabel = L.marker(LL(mid), { zIndexOffset: 1200, icon: L.divIcon({ className: 'vlabel', iconSize: [0, 0], html }) }).addTo(map); vecLabel._html = html; longPressAction(vecLabel, editHeading); }
     else { vecLabel.setLatLng(LL(mid)); if (vecLabel._html !== html) { vecLabel.setIcon(L.divIcon({ className: 'vlabel', iconSize: [0, 0], html })); vecLabel._html = html; longPressAction(vecLabel, editHeading); } }
     if (current.show.label === false) { if (map.hasLayer(vecLabel)) map.removeLayer(vecLabel); }
@@ -754,7 +755,7 @@ function syncQuick() {
   $('qRel').innerHTML = sol && sol.flRel ? `FL${Math.round(sol.flRel)}<br>${fmtInt(p.hOpen)} m` : `FL${Math.round(p.relMode === 'FL' ? p.relFL : aglToFl(+p.relAGL, prof, elevOf(current, wxRec)))}<br>${fmtInt(p.hOpen)} m`;
   $('qRelax').classList.toggle('on', !!current.show.relax); $('qLabel').classList.toggle('on', current.show.label !== false); $('qTicks').classList.toggle('on', !!current.show.rose);
   $('qRev').classList.toggle('on', !!current.reversed);
-  $('qPrv').textContent = current.prvManual ? 'PRV man.' : 'PRV auto'; $('qPrv').classList.toggle('on', !!current.prvManual);
+  $('qPrv').textContent = 'PRV auto'; $('qPrv').classList.toggle('hidden', !current.prvManual); // n'apparaît qu'après un choix manuel
   $('qVecAuto').classList.toggle('hidden', typeof current.offsetManual !== 'number');
   $('qWinds').classList.toggle('on', !$('windsBox').classList.contains('hidden'));
 }
@@ -1116,18 +1117,27 @@ async function doSearch() {
   const ul = $('searchResults'); ul.innerHTML = '';
   const c = parseCoords(q);
   if (c) { startNewZone(c, 17); return; }
-  ul.innerHTML = '<li class="mut">Recherche…</li>';
+  // 1) Clubs FFP enregistrés dans l'appli (sans réseau), proposés en premier
+  const clubs = typeof searchClubs === 'function' ? searchClubs(q) : [];
+  clubs.forEach(k => {
+    const li = document.createElement('li'); const b = document.createElement('button');
+    b.className = 'res club'; b.innerHTML = `<b>🪂 ${esc(k.n)}</b><br><small>Club FFP · ${esc(k.v)}</small>`;
+    b.onclick = () => startNewZone({ lat: k.lat, lng: k.lng }, 16);
+    li.append(b); ul.append(li);
+  });
+  // 2) Puis la recherche de lieux habituelle
+  const wait = document.createElement('li'); wait.className = 'mut'; wait.textContent = 'Recherche…'; ul.append(wait);
   try {
     const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=8&accept-language=fr&q=' + encodeURIComponent(q));
-    const js = await r.json(); ul.innerHTML = '';
-    if (!js.length) ul.innerHTML = '<li class="mut">Rien trouvé.</li>';
+    const js = await r.json(); wait.remove();
+    if (!js.length && !clubs.length) ul.innerHTML = '<li class="mut">Rien trouvé.</li>';
     js.forEach(x => {
       const li = document.createElement('li'); const b = document.createElement('button');
       b.className = 'res'; b.textContent = x.display_name;
       b.onclick = () => startNewZone({ lat: +x.lat, lng: +x.lon }, 16);
       li.append(b); ul.append(li);
     });
-  } catch (e) { ul.innerHTML = '<li class="mut">Recherche impossible (pas de réseau ?). Tu peux taper des coordonnées.</li>'; }
+  } catch (e) { wait.textContent = clubs.length ? 'Autres lieux : pas de réseau.' : 'Recherche impossible (pas de réseau ?). Tu peux taper des coordonnées.'; }
 }
 $('btnSearch').addEventListener('click', doSearch);
 $('searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
@@ -1335,7 +1345,7 @@ async function renderPdfCanvas() {
     g.strokeStyle = '#000'; g.lineWidth = 5 * u; g.stroke(); g.restore();
     dot(sol.start, C_START, 10); dot(sol.end, C_END, 10);
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, ne = sol.exits ? sol.exits.n : 1;
-    if (current.show.label !== false) shadowText(`${hdg(sol.heading - sol.decl)} M · ${fmtInt(sol.length)} m · ${ne} sortie${ne > 1 ? 's' : ''}`, mx + 18 * u, my, '#fff', 17); }
+    if (current.show.label !== false) shadowText(`${hdg(sol.heading - sol.decl)} M · ${fmtInt(sol.length)} m · ${ne} sortie${ne > 1 ? 's' : ''}${sol.exits && sol.exits.dt ? ` · ${fmt1(sol.exits.dt)} s` : ''}`, mx + 18 * u, my, '#fff', 17); }
   if (current.show.rose) { // rosace en degrés magnétiques
     const ro = roseOf(sol), c = toC(ro.c), Rr = ro.R * pxPerM(ro.c);
     g.save(); g.strokeStyle = '#fff'; g.globalAlpha = .85; g.lineWidth = 1.4 * u; g.setLineDash([4 * u, 6 * u]);
