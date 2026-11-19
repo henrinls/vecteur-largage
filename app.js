@@ -4,7 +4,7 @@ window.addEventListener('error', e => {
   const t = document.getElementById('toast');
   if (t) { t.textContent = 'Erreur : ' + (e.message || 'inconnue') + ' — ferme et rouvre l\'appli'; t.classList.remove('hidden'); }
 });
-const VERSION = '0.2.3';
+const VERSION = '0.2.4';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -256,14 +256,16 @@ function solve(z, prof, rec) {
     return d <= Rt[i] * (1 - f) + Rt[i + 1] * f;
   };
   const inside = (x, y) => reach(x + S[0].x, y + S[0].y) || reach(x + S[1].x, y + S[1].y);
-  const C0 = { x: -(S[0].x + S[1].x) / 2, y: -(S[0].y + S[1].y) / 2 };
   let Rmax = 0; for (let d = 0; d < 360; d++) Rmax = Math.max(Rmax, Rt[d]);
-  const Rs = Rmax + lat + 200;
+  // La zone de largage tient dans le cercle de relaxation (sans les 15 s) : on cherche autour de son centre.
+  // (Avant : centre = simple dérive en chute, sans la dérive sous voile → par vent fort il tombait hors de la zone
+  //  et le contour en pointillés était faux, coupé par un trait droit.)
+  const dC = driftBetween(prof, h1, hMin, +p.vz);
+  out.relax = { c: { x: -(dFF.x + dC.x), y: -(dFF.y + dC.y) }, R: Va * (h1 - hMin) / (+p.vz) };
+  const C0 = out.relax.c, Rs = out.relax.R + 100;
   // Vent moyen sous voile (de la fin des 15 s jusqu'à l'arrivée au PRV), pour l'explication
   let cu = 0, cv = 0, cn = 0; for (let h = h2; h > hMin; h -= DH) { const w = windAt(prof, h); cu += w.u; cv += w.v; cn++; }
   const canopyWind = spdDir({ u: cu / Math.max(cn, 1), v: cv / Math.max(cn, 1) });
-  const dC = driftBetween(prof, h1, hMin, +p.vz);
-  out.relax = { c: { x: -(dFF.x + dC.x), y: -(dFF.y + dC.y) }, R: Va * (h1 - hMin) / (+p.vz) };
   Object.assign(out, { u, r, S, C0, Rs, inside, dFF, dP, Rmax, Rt, reach, canopyWind, h1, h2 });
   // Recherche du plus long segment parallèle à l'axe, entièrement dans la zone
   const step = 10;
@@ -291,7 +293,7 @@ function solve(z, prof, rec) {
   };
   let bo = null, bs = null;
   if (typeof z.offsetManual === 'number') { // vecteur placé à la main : décalage latéral mémorisé par rapport au PRV
-    const o = z.offsetManual - (C0.x * r.x + C0.y * r.y);
+    const o = Math.max(-Rs, Math.min(Rs, z.offsetManual - (C0.x * r.x + C0.y * r.y))); // jamais plus loin que le cercle
     const tw = typeof z.tManual === 'number' ? z.tManual - (C0.x * u.x + C0.y * u.y) : null;
     const s = runOn(o, tw);
     if (s) { bo = o; bs = s; }

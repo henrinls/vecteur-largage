@@ -118,7 +118,6 @@ button.danger{border-color:#a33;color:#ff8a8a}
 .prv{-webkit-touch-callout:none;user-select:none}
 .prv span{position:absolute;left:9px;top:9px;width:18px;height:18px;border-radius:50%;background:#ffd400;border:2px solid #111;box-shadow:0 0 0 1.5px rgba(255,255,255,.8)}
 .prv.used span{left:1px;top:1px;width:34px;height:34px;background:#ff8c00;border:3px solid #111;box-shadow:0 0 0 2px #fff,0 0 12px 3px rgba(255,140,0,.85)}
-.prv.used span::after{content:'PRV';position:absolute;left:40px;top:50%;transform:translateY(-50%);font-weight:800;font-size:14px;color:#ff8c00;text-shadow:0 0 3px #000,0 0 3px #000}
 .vlabel{-webkit-touch-callout:none;user-select:none}
 .vlabel span{position:absolute;transform:translate(-50%,-50%);white-space:nowrap;background:rgba(0,0,0,.82);color:#fff;font-weight:800;font-size:15px;padding:5px 10px;border-radius:9px;border:2px solid #fff}
 .vlabel .vcap{color:#ffd400}
