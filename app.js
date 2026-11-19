@@ -4,7 +4,7 @@ window.addEventListener('error', e => {
   const t = document.getElementById('toast');
   if (t) { t.textContent = 'Erreur : ' + (e.message || 'inconnue') + ' — ferme et rouvre l\'appli'; t.classList.remove('hidden'); }
 });
-const VERSION = '0.4.1';
+const VERSION = '0.4.2';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -466,10 +466,10 @@ function draw(light) {
     }
     if (current.show.rose) { const ro = roseOf(sol); degRing(ro.c, ro.R, '#ffffff', sol.decl); }
     const a = LL(sol.start), b = LL(sol.end);
-    L.polyline([a, b], { color: '#fff', weight: 10, opacity: .85, interactive: false }).addTo(fig);
-    L.polyline([a, b], { color: '#000', weight: 5, interactive: false }).addTo(fig);
-    L.marker(a, { interactive: false, zIndexOffset: 600, icon: dotIcon(C_START, 18, '', 'big') }).addTo(fig);
-    L.marker(b, { interactive: false, zIndexOffset: 600, icon: dotIcon(C_END, 18, '', 'big') }).addTo(fig);
+    L.polyline([a, b], { color: '#fff', weight: 5, opacity: .9, interactive: false }).addTo(fig);
+    L.polyline([a, b], { color: '#000', weight: 2.5, interactive: false }).addTo(fig);
+    L.marker(a, { interactive: false, zIndexOffset: 600, icon: dotIcon(C_START, 14, '') }).addTo(fig);
+    L.marker(b, { interactive: false, zIndexOffset: 600, icon: dotIcon(C_END, 14, '') }).addTo(fig);
   }
   placeMarkers();
 }
@@ -1341,11 +1341,11 @@ async function renderPdfCanvas() {
   if (pv && current.show.prev !== false) { const a = toC(pv.start), b = toC(pv.end); g.save(); g.strokeStyle = '#bbb'; g.lineWidth = 3 * u; g.setLineDash([8 * u, 8 * u]); g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke(); g.restore(); shadowText(`ancien ${fmtWhen(pv.when)}`, b.x + 10 * u, b.y, '#ddd', 11); }
   current.prvs.forEach(p => { const used = sol.prv && p.id === sol.prv.id; g.save(); g.globalAlpha = used ? 1 : 0.5; dot(p, used ? C_PRVUSED : C_PRV, 6); g.restore(); });
   { const a = toC(sol.start), b = toC(sol.end);
-    g.save(); g.lineCap = 'round'; g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 10 * u; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
-    g.strokeStyle = '#000'; g.lineWidth = 5 * u; g.stroke(); g.restore();
-    dot(sol.start, C_START, 10); dot(sol.end, C_END, 10);
+    g.save(); g.lineCap = 'round'; g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 5 * u; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
+    g.strokeStyle = '#000'; g.lineWidth = 2.5 * u; g.stroke(); g.restore();
+    dot(sol.start, C_START, 6); dot(sol.end, C_END, 6);
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, ne = sol.exits ? sol.exits.n : 1;
-    if (current.show.label !== false) shadowText(`${hdg(sol.heading - sol.decl)} M · ${fmtInt(sol.length)} m · ${ne} sortie${ne > 1 ? 's' : ''}${sol.exits && sol.exits.dt ? ` · ${fmt1(sol.exits.dt)} s` : ''}`, mx + 18 * u, my, '#fff', 17); }
+    /* PDF : jamais de cartouche sur la carte, tout est dans le bandeau d'informations */ }
   if (current.show.rose) { // rosace en degrés magnétiques
     const ro = roseOf(sol), c = toC(ro.c), Rr = ro.R * pxPerM(ro.c);
     g.save(); g.strokeStyle = '#fff'; g.globalAlpha = .85; g.lineWidth = 1.4 * u; g.setLineDash([4 * u, 6 * u]);
@@ -1383,9 +1383,10 @@ async function renderPdfCanvas() {
   tx(`${current.name}`, col1, l0, '#fff', fs * 1.3, true);
   tx(`Saut du ${fmtWhen(current.when).replace(' ', ' à ')} · ${wxRec ? wxRec.model : ''}`, col1, l0 + lh * 1.2, '#bbb');
   const exP = sol.exits || { n: 1 };
-  tx(`Vecteur ${hdg(sol.heading - sol.decl)} M (${hdg(sol.heading)} vrai) · ${fmtInt(sol.length)} m · ${exP.n} sortie${exP.n > 1 ? 's' : ''}${exP.dt ? ` (une toutes les ${fmt1(exP.dt)} s)` : ''}`, col1, l0 + lh * 2.4, '#fff', fs, true);
-  tx(`Largage FL${Math.round(sol.flRel)} = ${fmtInt(sol.hRel)} m sol · ouverture ${fmtInt(p.hOpen)} m sol`, col1, l0 + lh * 3.4, C_END, fs, true);
-  tx(`PRV ${sol.prvAuto ? 'automatique' : 'choisi à la main'} · ${sol.why}${current.reversed ? ' · sens inversé' : ''}`, col1, l0 + lh * 4.4, C_PRVUSED, fs);
+  tx(`Vecteur ${hdg(sol.heading - sol.decl)} M (${hdg(sol.heading)} vrai) · ${fmtInt(sol.length)} m`, col1, l0 + lh * 2.4, '#fff', fs, true);
+  tx(`${exP.n} sortie${exP.n > 1 ? 's' : ''}${exP.dt ? ` · une toutes les ${fmt1(exP.dt)} s (${fmtInt(exP.s)} m au sol, séparation ${exP.sep} m)` : ''}`, col1, l0 + lh * 3.4, C_PRVUSED, fs, true);
+  tx(`Largage FL${Math.round(sol.flRel)} = ${fmtInt(sol.hRel)} m sol · ouverture ${fmtInt(p.hOpen)} m sol`, col1, l0 + lh * 4.4, C_END, fs, true);
+  tx(`PRV ${sol.prvAuto ? 'automatique' : 'choisi à la main'} · ${sol.why}${current.reversed ? ' · sens inversé' : ''}`, col1, l0 + lh * 5.4, '#ffd400', fs);
   [
     `Vent de largage : ${hdg(sol.windRel.dir)} ${Math.round(sol.windRel.spd * KT)} kt (${fmt1(sol.windRel.spd)} m/s) · avion ${Math.round(p.acMs * KT)} kt`,
     `Chute ${p.vff} m/s · perte à l'ouverture ${p.openLoss} m`,
