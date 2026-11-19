@@ -167,3 +167,6 @@ select{width:100%;padding:10px;border-radius:10px;background:#202020;color:#eee;
 
 /* iPhone : pas de zoom ni de délai sur les appuis répétés (double-tap) */
 button,input,select,label,a{touch-action:manipulation}
+
+/* TEMPORAIRE : bouton test vent 0 */
+#quick #qZero{border-color:#ff2020;color:#ff8080;font-size:12px}#quick #qZero.on{background:#ff2020;color:#fff}

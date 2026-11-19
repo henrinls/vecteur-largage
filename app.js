@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.8.2';
+const VERSION = '0.8.3';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -72,7 +72,10 @@ async function wxFetch(z, date) {
   return rec;
 }
 // Profil de vent à une heure donnée : niveaux en hauteur sol (m AGL), vent (u, v vers où il souffle), température
-function wxProfile(rec, when, elevUsed) {
+// TEMPORAIRE (19/11/2026, demande d'Henri) : vent forcé à 0 à toutes les hauteurs, pour voir un vecteur sans vent. À retirer.
+let zeroWind = (() => { try { return localStorage.getItem('vl.zeroWind') === 'true'; } catch (e) { return false; } })();
+function wxProfile(rec, when, elevUsed) { const pr = wxProfileRaw(rec, when, elevUsed); if (pr && zeroWind) pr.lv.forEach(l => { l.spd = 0; l.u = 0; l.v = 0; }); return pr; }
+function wxProfileRaw(rec, when, elevUsed) {
   if (!rec) return null;
   const H = rec.hourly, i = (H.time || []).indexOf(when);
   if (i < 0) return null;
@@ -455,7 +458,7 @@ function compute() {
   const elev = elevOf(current, wxRec);
   prof = wxProfile(wxRec, current.when, elev);
   const key = JSON.stringify([current.id, current.when, current.prvs, current.params, current.axis, current.elevManual, current.prvManual,
-    current.headingOverride, current.reversed, current.offsetManual, current.tManual, elev, wxRec && wxRec.fetched]);
+    current.headingOverride, current.reversed, current.offsetManual, current.tManual, elev, wxRec && wxRec.fetched, zeroWind]);
   if (key !== solKey) { sol = solve(current, prof, wxRec); solKey = key; }
   if (sol.ok) current.vector = { when: current.when, start: sol.start, end: sol.end, heading: sol.heading, length: Math.round(sol.length), decl: sol.decl, prv: sol.prv.id };
 }
@@ -467,7 +470,7 @@ function draw(light) {
   if (placing) placeBanner();
   else if (!current.prvs.length) setBanner(current.id ? 'Place les points de rendez-vous : ☰ Zones → PRV → Toucher la carte.' : 'Pour commencer : ☰ → ＋ Nouvelle zone.');
   else if (!sol.ok) setBanner(sol.err);
-  else setBanner(sol.warn || null);
+  else setBanner(zeroWind ? 'TEST : vent forcé à 0 partout (bouton « Vent 0 » pour revenir aux prévisions)' : (sol.warn || null));
   if (sol.ok) {
     if (current.show.relax) {
       const key = [current.when, sol.heading, sol.prv.id, JSON.stringify(current.params), sol.elev, wxRec && wxRec.fetched].join('|');
@@ -769,6 +772,7 @@ function syncQuick() {
   const p = current.params;
   $('qWhen').innerHTML = `🕑 ${fmtWhen(current.when)}`;
   $('qRel').innerHTML = sol && sol.flRel ? `FL${Math.round(sol.flRel)}<br>${fmtInt(p.hOpen)} m` : `FL${Math.round(p.relMode === 'FL' ? p.relFL : aglToFl(+p.relAGL, prof, elevOf(current, wxRec)))}<br>${fmtInt(p.hOpen)} m`;
+  $('qZero').classList.toggle('on', zeroWind);
   $('qRelax').classList.toggle('on', !!current.show.relax); $('qLabel').classList.toggle('on', current.show.label !== false); $('qTicks').classList.toggle('on', !!current.show.rose);
   $('qRev').classList.toggle('on', !!current.reversed);
   $('qPrv').textContent = 'PRV auto'; $('qPrv').classList.toggle('hidden', !current.prvManual); // n'apparaît qu'après un choix manuel
@@ -1404,7 +1408,7 @@ async function renderPdfCanvas() {
   tx(`Largage FL${Math.round(sol.flRel)} = ${fmtInt(sol.hRel)} m sol · ouverture ${fmtInt(p.hOpen)} m sol`, col1, l0 + lh * 4.4, C_END, fs, true);
   tx(`PRV ${sol.prvAuto ? 'automatique' : 'choisi à la main'} · ${sol.why}${current.reversed ? ' · sens inversé' : ''}`, col1, l0 + lh * 5.4, '#ffd400', fs);
   [
-    `Vent de largage : ${hdg(sol.windRel.dir)} ${Math.round(sol.windRel.spd * KT)} kt (${fmt1(sol.windRel.spd)} m/s) · ${acName()} ${Math.round(p.acMs * KT)} kt badin (${Math.round(sol.tas * KT)} kt vraie)`,
+    (zeroWind ? 'TEST VENT FORCÉ À 0 · ' : '') + `Vent de largage : ${hdg(sol.windRel.dir)} ${Math.round(sol.windRel.spd * KT)} kt (${fmt1(sol.windRel.spd)} m/s) · ${acName()} ${Math.round(p.acMs * KT)} kt badin (${Math.round(sol.tas * KT)} kt vraie)`,
     `Chute ${p.vff} m/s · perte à l'ouverture ${p.openLoss} m`,
     `${p.perpTime} s perpendiculaire · Vz ${fmt1(+p.vz)} m/s · finesse ${fmt1(+p.glide)}`,
     `Arrivée au PRV à ${p.hMin} m minimum · marge de sécurité ${sol.margin} % · terrain ${Math.round(sol.elev)} m`,
@@ -1525,3 +1529,5 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}); });
   }).catch(() => {});
 }
+
+$('qZero').addEventListener('click', () => { zeroWind = !zeroWind; store.set('vl.zeroWind', zeroWind); current.offsetManual = null; compute(); redraw(); syncQuick(); fillInputs(true); if ($('windsBox') && !$('windsBox').classList.contains('hidden')) renderWinds(); toast(zeroWind ? 'Vent forcé à 0 partout (test)' : 'Vents de la prévision'); });
