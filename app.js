@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.8.6';
+const VERSION = '0.9.0';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -490,7 +490,7 @@ function draw(light) {
     if (current.show.relax) {
       const key = [current.when, sol.heading, sol.prv.id, JSON.stringify(current.params), sol.elev, wxRec && wxRec.fetched].join('|');
       if (!light && key !== relaxKey) { relaxPts = relaxPolygon(sol); patPts = patatoidPolygon(sol); relaxKey = key; }
-      if (relaxPts) L.polygon(relaxPts.map(LL), { color: C_RELAX, weight: 1.75, fillColor: C_RELAX, fillOpacity: .08, smoothFactor: 0, interactive: false }).addTo(fig);
+      if (relaxPts) L.polygon(relaxPts.map(LL), { color: C_RELAX, weight: 1.75, fill: false, smoothFactor: 0, interactive: false }).addTo(fig);
       if (patPts) L.polygon(patPts.map(LL), { color: C_RELAX, weight: 1.5, dashArray: '6 5', fill: false, smoothFactor: 0, interactive: false }).addTo(fig);
     }
     if (current.show.rose) { const ro = roseOf(sol); degRing(ro.c, ro.R, '#ffffff', sol.decl); }
@@ -788,8 +788,8 @@ $('z_elev').addEventListener('change', e => { const raw = e.target.value.trim();
 // ---------- Bascules rapides sur la carte ----------
 function syncQuick() {
   const p = current.params;
-  $('qWhen').innerHTML = `🕑 ${fmtWhen(current.when)}`;
-  $('qRel').innerHTML = sol && sol.flRel ? `FL${Math.round(sol.flRel)}<br>${fmtInt(p.hOpen)} m` : `FL${Math.round(p.relMode === 'FL' ? p.relFL : aglToFl(+p.relAGL, prof, elevOf(current, wxRec)))}<br>${fmtInt(p.hOpen)} m`;
+  const flQ = sol && sol.flRel ? Math.round(sol.flRel) : Math.round(p.relMode === 'FL' ? p.relFL : aglToFl(+p.relAGL, prof, elevOf(current, wxRec)));
+  $('qWhen').innerHTML = `🕑 ${fmtWhen(current.when)}<br><b>FL${flQ}</b><br>ouv. ${fmtInt(p.hOpen)} m`; // un seul bouton : date, heure, largage, ouverture
   $('qZero').classList.toggle('on', zeroWind);
   $('qRelax').classList.toggle('on', !!current.show.relax); $('qLabel').classList.toggle('on', current.show.label !== false); $('qTicks').classList.toggle('on', !!current.show.rose);
   $('qRev').classList.toggle('on', !!current.reversed);
@@ -832,7 +832,6 @@ async function ensureWx(force, date) {
 }
 function setWhen(w) { current.holdWx = false; current.when = w; current.offsetManual = null; persist(); redraw(); syncJump(); ensureWx(false); }
 $('qWhen').addEventListener('click', () => $('jumpBox').classList.toggle('hidden'));
-$('qRel').addEventListener('click', () => $('jumpBox').classList.toggle('hidden'));
 $('jumpOk').addEventListener('click', () => { $('jumpBox').classList.add('hidden'); if (sol && sol.ok) fitFigure(); });
 $('j_minus').addEventListener('click', () => setWhen(shiftWhen(current.when, -1)));
 $('j_plus').addEventListener('click', () => setWhen(shiftWhen(current.when, 1)));
@@ -880,11 +879,17 @@ $('btnPlaceP').addEventListener('click', () => {
 });
 
 // À l'ouverture d'une zone : vecteur déjà calculé → l'afficher ou mettre à jour à maintenant
-async function askOldVector() {
+// Réponse « Garder » mémorisée 10 min : un rechargement automatique (nouvelle version installée juste après le démarrage)
+// ne doit pas reposer la question (bug : il fallait répondre deux fois).
+const keptKey = () => 'vl.kept.' + (current.id || 'tmp');
+async function askOldVector(atStartup) {
   const v = current.vector, now = nowWhen();
   if (!v || !v.when || v.when === now) { current.when = now; current.holdWx = false; return; }
+  if (atStartup) { let k = null; try { k = JSON.parse(sessionStorage.getItem(keptKey()) || 'null'); } catch (e) {}
+    if (k && k.when === v.when && Date.now() - k.t < 600e3) { current.when = v.when; current.holdWx = true; return; } }
   const r = await ask(`Un vecteur de largage est enregistré pour cette zone (saut du ${fmtWhen(v.when)}).`, undefined, null, 'Mettre à jour à maintenant', 'Garder ce vecteur');
-  if (r !== true) { current.when = v.when; current.holdWx = true; persist(); redraw(); syncJump(); return; } // gardé tel quel, avec sa date et son heure
+  if (r !== true) { try { sessionStorage.setItem(keptKey(), JSON.stringify({ when: v.when, t: Date.now() })); } catch (e) {}
+    current.when = v.when; current.holdWx = true; persist(); redraw(); syncJump(); return; } // gardé tel quel, avec sa date et son heure
   current.holdWx = false; current.when = now; persist(); redraw(); syncJump(); ensureWx(true);
 }
 
@@ -1375,7 +1380,7 @@ async function renderPdfCanvas() {
   // ---- Zone de relaxation, PRV, vecteur ----
   const poly = (pts, stroke, fill, w, dash) => { if (!pts || pts.length < 3) return; g.save(); g.beginPath(); pts.forEach((ll, i) => { const q = toC(ll); i ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y); }); g.closePath();
     if (fill) { g.fillStyle = fill; g.fill(); } g.strokeStyle = stroke; g.lineWidth = w * u; g.setLineDash(dash ? dash.map(d => d * u) : []); g.stroke(); g.restore(); };
-  if (current.show.relax) { poly(relaxPolygon(sol), C_RELAX, 'rgba(0,229,255,.08)', 2.6); poly(patatoidPolygon(sol), C_RELAX, null, 2.2, [8, 6]); }
+  if (current.show.relax) { poly(relaxPolygon(sol), C_RELAX, null, 2.6); poly(patatoidPolygon(sol), C_RELAX, null, 2.2, [8, 6]); }
   // PDF = même dessin que la carte, juste plus épais pour l'impression : PRV de même taille, l'inactif en transparence
   current.prvs.forEach(p => { const used = sol.prv && p.id === sol.prv.id; g.save(); g.globalAlpha = used ? 1 : 0.5; dot(p, used ? C_PRVUSED : C_PRV, 9); g.restore(); });
   { const a = toC(sol.start), b = toC(sol.end);
@@ -1535,7 +1540,7 @@ syncCompass();
 fillInputs();
 redraw();
 if (!current.prvs.length && !current.id && current.zoom < 10) locate(true); else locate(false);
-if (current.id) askOldVector().then(() => { compute(); if (sol && sol.ok) fitFigure(); fillInputs(); ensureWx(false); });
+if (current.id) askOldVector(true).then(() => { compute(); if (sol && sol.ok) fitFigure(); fillInputs(); ensureWx(false); });
 window.addEventListener('online', () => { if (current.id) ensureWx(false); });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && current.id) ensureWx(false); });
 // Mise à jour automatique : vérifie une nouvelle version à chaque retour sur l'appli et recharge dès qu'elle est installée
