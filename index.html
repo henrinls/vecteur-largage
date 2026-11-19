@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>vecteur-largage</title>
 <link rel="stylesheet" href="vendor/leaflet.css">
-<link rel="stylesheet" href="style.css?v=0.11.0">
+<link rel="stylesheet" href="style.css?v=0.11.1">
 </head>
 <body>
 <div id="map"></div>
@@ -177,16 +177,16 @@
     </div>
     <h4>Sous voile</h4>
     <div class="grid2">
-      <div><label>Durée perpendiculaire à l'axe (s)</label><input id="p_perpTime" inputmode="decimal"></div>
+      <div><label>Perpendiculaire à l'axe (s)</label><input id="p_perpTime" inputmode="decimal"></div>
+      <div><label>Arrivée au PRV (m sol)</label><input id="p_hMin" inputmode="decimal"></div>
+      <div><label>Vitesse horizontale (m/s)</label><input id="p_vh" inputmode="decimal"></div>
       <div><label>Vitesse verticale (m/s)</label><input id="p_vz" inputmode="decimal"></div>
-      <div><label>Finesse</label><input id="p_glide" inputmode="decimal"></div>
-      <div><label>Arrivée au PRV au minimum (m sol)</label><input id="p_hMin" inputmode="decimal"></div>
     </div>
+    <p class="hint" id="glideInfo"></p>
     <h4>Sorties</h4>
     <div class="grid2">
       <div><label>Séparation mini entre sorties (m)</label><input id="p_sep" inputmode="decimal"></div>
     </div>
-    <p class="hint" id="vhInfo"></p>
     <p class="hint">Après l'ouverture : vol perpendiculaire à l'axe, du meilleur côté (sauf le dernier para, qui n'a personne derrière lui), puis route directe vers le PRV (dérive corrigée en crabe). Le vecteur est le plus long segment de l'axe d'où chacun peut rejoindre le PRV à la hauteur minimum.</p>
   </div>
 
@@ -226,12 +226,12 @@
 
 <div id="toast" class="hidden"></div>
 
-<script src="vendor/leaflet.js?v=0.11.0"></script>
-<script src="vendor/leaflet-rotate.js?v=0.11.0"></script>
-<script src="geo.js?v=0.11.0"></script>
-<script src="clubs.js?v=0.11.0"></script>
-<script src="wmm.js?v=0.11.0"></script>
-<script src="app.js?v=0.11.0"></script>
-<script src="photo.js?v=0.11.0"></script>
+<script src="vendor/leaflet.js?v=0.11.1"></script>
+<script src="vendor/leaflet-rotate.js?v=0.11.1"></script>
+<script src="geo.js?v=0.11.1"></script>
+<script src="clubs.js?v=0.11.1"></script>
+<script src="wmm.js?v=0.11.1"></script>
+<script src="app.js?v=0.11.1"></script>
+<script src="photo.js?v=0.11.1"></script>
 </body>
 </html>

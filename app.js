@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.11.0';
+const VERSION = '0.11.1';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -777,7 +777,7 @@ function setBanner(t) { const b = $('banner'); if (!t) b.classList.add('hidden')
 let toastT;
 function toast(t) { const el = $('toast'); el.textContent = t; el.classList.remove('hidden'); clearTimeout(toastT); toastT = setTimeout(() => el.classList.add('hidden'), 3200); }
 const numIn = el => parseFloat(String(el.value).replace(',', '.'));
-const HYP = ['vff', 'openLoss', 'perpTime', 'vz', 'glide', 'hMin', 'sep'];
+const HYP = ['vff', 'openLoss', 'perpTime', 'hMin', 'sep']; // vitesses sous voile à part : on saisit Vh et Vz, la finesse en découle
 function setParam(k, v) { current.params[k] = v; profile[k] = v; store.set('vl.profile', profile); zones.forEach(applyProfile); store.set('vl.zones', zones); }
 function fillInputs(only) {
   const p = current.params;
@@ -789,7 +789,9 @@ function fillInputs(only) {
   ['p_relAGL', 'j_relAGL'].forEach(id => { if (document.activeElement !== $(id)) $(id).value = Math.round(agl); });
   if (document.activeElement !== $('j_hOpen')) $('j_hOpen').value = p.hOpen;
   fillAc();
-  $('vhInfo').textContent = `Vitesse horizontale sous voile : ${fmt1((+p.vz) * (+p.glide))} m/s (vitesse verticale × finesse).`;
+  if (document.activeElement !== $('p_vh')) $('p_vh').value = fmt1((+p.vz) * (+p.glide));
+  if (document.activeElement !== $('p_vz')) $('p_vz').value = fmt1(+p.vz);
+  $('glideInfo').textContent = `Finesse ${fmt1(+p.glide)}`;
   if (only) return;
   $('z_axisOn').checked = !!current.axis.on; $('z_axisBoth').checked = current.axis.both !== false;
   if (document.activeElement !== $('z_axisMag')) $('z_axisMag').value = current.axis.on ? Math.round(current.axis.mag) : (current.axis.mag || '');
@@ -802,6 +804,10 @@ HYP.concat(['hOpen']).forEach(k => {
   $('p_' + k).addEventListener('input', e => { const v = numIn(e.target); if (isNaN(v)) return; setParam(k, v); persist(); redraw(); });
   $('p_' + k).addEventListener('blur', () => fillInputs(true));
 });
+// Sous voile : on saisit la vitesse horizontale et la vitesse verticale ; la finesse (gardée pour le calcul) = Vh ÷ Vz
+$('p_vh').addEventListener('input', e => { const v = numIn(e.target); const vz = +current.params.vz; if (isNaN(v) || !(v > 0) || !(vz > 0)) return; setParam('glide', v / vz); persist(); redraw(); $('glideInfo').textContent = `Finesse ${fmt1(v / vz)}`; });
+$('p_vz').addEventListener('input', e => { const v = numIn(e.target); if (isNaN(v) || !(v > 0)) return; const vh = (+current.params.vz) * (+current.params.glide); setParam('vz', v); setParam('glide', vh / v); persist(); redraw(); $('glideInfo').textContent = `Finesse ${fmt1(vh / v)}`; });
+['p_vh', 'p_vz'].forEach(id => $(id).addEventListener('blur', () => fillInputs(true)));
 // Avion : vitesses de largage (badin, nœuds) ; « Saisie manuelle » pour une autre valeur
 const AIRCRAFT = { pc6: ['Pilatus PC-6', 70], c208: ['Cessna Caravan', 85], dhc6: ['Twin Otter', 85], cn235: ['CASA CN235', 110], a400: ['A400M / C-130J', 130] };
 const acName = () => { const t = AIRCRAFT[current.params.acType]; return t && Math.round(current.params.acMs * KT) === t[1] ? t[0] : 'Avion'; };
@@ -1512,7 +1518,7 @@ async function renderPdfCanvas() {
   [
     (zeroWind ? 'TEST VENT FORCÉ À 0 · ' : '') + `Vent de largage : ${hdg(sol.windRel.dir)} ${Math.round(sol.windRel.spd * KT)} kt (${fmt1(sol.windRel.spd)} m/s) · ${acName()} ${Math.round(p.acMs * KT)} kt badin (${Math.round(sol.tas * KT)} kt vraie)`,
     `Chute ${p.vff} m/s · perte à l'ouverture ${p.openLoss} m`,
-    `${p.perpTime} s perpendiculaire (sauf le dernier) · Vz ${fmt1(+p.vz)} m/s · finesse ${fmt1(+p.glide)}`,
+    `${p.perpTime} s perpendiculaire (sauf le dernier) · sous voile Vh ${fmt1((+p.vz) * (+p.glide))} m/s, Vz ${fmt1(+p.vz)} m/s (finesse ${fmt1(+p.glide)})`,
     `Arrivée au PRV à ${p.hMin} m minimum · terrain ${Math.round(sol.elev)} m`,
     `Déclinaison ${fmt1(sol.decl)}° · vents détaillés en page 2`
   ].forEach((s2, i) => tx(s2, col2, l0 + i * lh, '#eee'));
