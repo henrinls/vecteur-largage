@@ -4,7 +4,7 @@ window.addEventListener('error', e => {
   const t = document.getElementById('toast');
   if (t) { t.textContent = 'Erreur : ' + (e.message || 'inconnue') + ' — ferme et rouvre l\'appli'; t.classList.remove('hidden'); }
 });
-const VERSION = '0.4.2';
+const VERSION = '0.4.3';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -142,6 +142,7 @@ function upgrade(z) {
   z.reversed = !!z.reversed;
   if (z.offsetManual === undefined) z.offsetManual = null;          // vecteur déplacé à la main (décalage latéral, m)
   if (z.tManual === undefined) z.tManual = null;
+  delete z.prevVector; if (z.show) delete z.show.prev; // ancien vecteur gardé : fonction retirée (v0.4.3)
   if (typeof z.when !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:00$/.test(z.when)) z.when = nowWhen(); // date et heure du saut
   return z;
 }
@@ -451,12 +452,6 @@ function draw(light) {
   else if (!current.prvs.length) setBanner(current.id ? 'Place les points de rendez-vous : ☰ Zones → PRV → Toucher la carte.' : 'Pour commencer : ☰ → ＋ Nouvelle zone.');
   else if (!sol.ok) setBanner(sol.err);
   else setBanner(sol.warn || null);
-  // Ancien vecteur gardé (gris, pointillés)
-  const pv = current.prevVector;
-  if (pv && current.show.prev !== false) {
-    L.polyline([LL(pv.start), LL(pv.end)], { color: '#aaa', weight: 3, dashArray: '6 6', interactive: false }).addTo(fig);
-    L.marker(LL(pv.end), { interactive: false, icon: L.divIcon({ className: 'plabel prevl', iconSize: [0, 0], html: `<span>${fmtWhen(pv.when)}</span>` }) }).addTo(grads);
-  }
   if (sol.ok) {
     if (current.show.relax) {
       const key = [current.when, sol.heading, sol.prv.id, JSON.stringify(current.params), sol.elev, wxRec && wxRec.fetched].join('|');
@@ -643,10 +638,9 @@ function figurePoints() {
   const pts = [sol.start, sol.end];
   if (current.show.relax && relaxPts) relaxPts.forEach(p => pts.push(p));
   if (current.show.rose) { const ro = roseOf(sol); [0, 90, 180, 270].forEach(a => pts.push(Geo.fromLocal(ro.c, { x: (ro.R + 60) * Math.sin(a * Math.PI / 180), y: (ro.R + 60) * Math.cos(a * Math.PI / 180) }))); }
-  // PRV et ancien vecteur : seulement s'ils sont dans le cercle de relaxation (sinon ils réduiraient trop le zoom)
+  // PRV : seulement s'ils sont dans le cercle de relaxation (sinon ils réduiraient trop le zoom)
   const inCircle = ll => { if (!sol.relax) return false; const q = Geo.toLocal(sol.prv, ll); return Math.hypot(q.x - sol.relax.c.x, q.y - sol.relax.c.y) <= sol.relax.R; };
   current.prvs.forEach(p => { if (inCircle(p)) pts.push({ lat: p.lat, lng: p.lng }); });
-  const pv = current.prevVector; if (pv && current.show.prev !== false) [pv.start, pv.end].forEach(q => { if (inCircle(q)) pts.push(q); });
   return pts;
 }
 function freeRect() {
@@ -688,8 +682,6 @@ function updateInfo() {
     `Sous voile : vent moyen <b>${Math.round(sol.canopyWind.spd * KT)} kt</b> pour ${Math.round(sol.Va * KT)} kt de vitesse propre` +
     (sol.canopyWind.spd >= sol.Va ? ' <b class="warn">→ tu ne remontes pas au vent : il faut ouvrir au vent du PRV.</b>' : '.') : '';
   $('elevAuto').textContent = typeof current.elevAuto === 'number' ? `automatique : ${current.elevAuto} m` : 'automatique : inconnue (pas encore de prévision)';
-  $('prevBox').classList.toggle('hidden', !current.prevVector);
-  if (current.prevVector) $('prevInfo').textContent = `Ancien vecteur du ${fmtWhen(current.prevVector.when)} : ${hdg(current.prevVector.heading - (current.prevVector.decl || 0))} M, ${fmtInt(current.prevVector.length)} m`;
 }
 
 // ---------- Interface ----------
@@ -745,8 +737,6 @@ $('z_axisOn').addEventListener('change', e => { current.axis.on = e.target.check
 $('z_axisBoth').addEventListener('change', e => { current.axis.both = e.target.checked; persist(); redraw(); });
 $('z_axisMag').addEventListener('change', e => { const v = numIn(e.target); if (isNaN(v)) return; current.axis.mag = n360(v); current.axis.on = true; current.headingOverride = null; current.offsetManual = null; persist(); fillInputs(); redraw(); });
 $('z_elev').addEventListener('change', e => { const raw = e.target.value.trim(); current.elevManual = raw === '' ? null : numIn(e.target); if (isNaN(current.elevManual)) current.elevManual = null; persist(); fillInputs(); redraw(); });
-$('prevToggle').addEventListener('click', () => { current.show.prev = current.show.prev === false; persist(); redraw(); });
-$('prevDel').addEventListener('click', async () => { if (await ask('Supprimer l\'ancien vecteur ?')) { current.prevVector = null; persist(); redraw(); } });
 
 // ---------- Bascules rapides sur la carte ----------
 function syncQuick() {
@@ -839,14 +829,12 @@ $('btnPlaceP').addEventListener('click', () => {
   stopMeasure(); placing = 'P'; syncPlaceBtn(); placeBanner(); closeSheet();
 });
 
-// À l'ouverture d'une zone : vecteur déjà calculé → l'afficher ou mettre à jour à maintenant (et garder l'ancien ?)
+// À l'ouverture d'une zone : vecteur déjà calculé → l'afficher ou mettre à jour à maintenant
 async function askOldVector() {
   const v = current.vector, now = nowWhen();
   if (!v || !v.when || v.when === now) { current.when = now; return; }
   const r = await ask(`Un vecteur de largage existe pour cette zone (saut du ${fmtWhen(v.when)}).`, undefined, null, 'Mettre à jour à maintenant', 'Afficher ce vecteur');
   if (r !== true) { current.when = v.when; persist(); redraw(); syncJump(); return; }
-  const keep = await ask('Garder l\'ancien vecteur (affiché en gris, pointillés) ?', undefined, null, 'Garder', 'Non');
-  if (keep === true) { current.prevVector = clone(v); current.show.prev = true; }
   current.when = now; persist(); redraw(); syncJump(); ensureWx(true);
 }
 
@@ -1337,8 +1325,6 @@ async function renderPdfCanvas() {
   const poly = (pts, stroke, fill, w, dash) => { if (!pts || pts.length < 3) return; g.save(); g.beginPath(); pts.forEach((ll, i) => { const q = toC(ll); i ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y); }); g.closePath();
     if (fill) { g.fillStyle = fill; g.fill(); } g.strokeStyle = stroke; g.lineWidth = w * u; g.setLineDash(dash ? dash.map(d => d * u) : []); g.stroke(); g.restore(); };
   if (current.show.relax) { poly(relaxPolygon(sol), C_RELAX, 'rgba(0,229,255,.08)', 2.6); poly(patatoidPolygon(sol), C_RELAX, null, 2.2, [8, 6]); }
-  const pv = current.prevVector;
-  if (pv && current.show.prev !== false) { const a = toC(pv.start), b = toC(pv.end); g.save(); g.strokeStyle = '#bbb'; g.lineWidth = 3 * u; g.setLineDash([8 * u, 8 * u]); g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke(); g.restore(); shadowText(`ancien ${fmtWhen(pv.when)}`, b.x + 10 * u, b.y, '#ddd', 11); }
   current.prvs.forEach(p => { const used = sol.prv && p.id === sol.prv.id; g.save(); g.globalAlpha = used ? 1 : 0.5; dot(p, used ? C_PRVUSED : C_PRV, 6); g.restore(); });
   { const a = toC(sol.start), b = toC(sol.end);
     g.save(); g.lineCap = 'round'; g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 5 * u; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
