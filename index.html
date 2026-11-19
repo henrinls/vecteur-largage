@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>vecteur-largage</title>
 <link rel="stylesheet" href="vendor/leaflet.css">
-<link rel="stylesheet" href="style.css?v=0.9.8">
+<link rel="stylesheet" href="style.css?v=0.10.0">
 </head>
 <body>
 <div id="map"></div>
@@ -92,6 +92,12 @@
     <h3>Points de rendez-vous (PRV)</h3>
     <div class="row"><button id="btnPlaceP" class="wide">📍 Placer un PRV (toucher la carte)</button></div>
     <p class="hint">1, 2 ou 4 PRV. Par défaut l'appli prend le plus au vent (vent moyen 0–300 m). Appui long sur un PRV : l'utiliser comme référence ou le supprimer ; « PRV auto » (à gauche de la carte) pour revenir au choix automatique.</p>
+
+    <h3>Centre de la DZ (verticale terrain)</h3>
+    <div class="grid2"><button id="btnPlaceDZ">📍 Toucher la carte</button><button id="btnDzGps">🛰 Ma position (GPS)</button></div>
+    <p class="hint" id="dzInfo"></p>
+    <button id="btnDzDel" class="wide hidden">✕ Supprimer le centre de la DZ</button>
+    <p class="hint">Sert à annoncer où est le point vert par rapport à la verticale du terrain : nautiques avant (le long de l'axe) et décalage de l'axe (au point cardinal près). Appui long sur le centre pour le déplacer.</p>
 
     <h3>Axe imposé par la zone</h3>
     <label class="check"><input type="checkbox" id="z_axisOn"> Axe de largage imposé</label>
@@ -219,12 +225,12 @@
 
 <div id="toast" class="hidden"></div>
 
-<script src="vendor/leaflet.js?v=0.9.8"></script>
-<script src="vendor/leaflet-rotate.js?v=0.9.8"></script>
-<script src="geo.js?v=0.9.8"></script>
-<script src="clubs.js?v=0.9.8"></script>
-<script src="wmm.js?v=0.9.8"></script>
-<script src="app.js?v=0.9.8"></script>
-<script src="photo.js?v=0.9.8"></script>
+<script src="vendor/leaflet.js?v=0.10.0"></script>
+<script src="vendor/leaflet-rotate.js?v=0.10.0"></script>
+<script src="geo.js?v=0.10.0"></script>
+<script src="clubs.js?v=0.10.0"></script>
+<script src="wmm.js?v=0.10.0"></script>
+<script src="app.js?v=0.10.0"></script>
+<script src="photo.js?v=0.10.0"></script>
 </body>
 </html>

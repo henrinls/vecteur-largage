@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.9.8';
+const VERSION = '0.10.0';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -144,6 +144,7 @@ function upgrade(z) {
   z.params = Object.assign({}, DEFAULT_PARAMS, z.params || {});
   z.show = Object.assign({}, SHOW_DEFAULT, typeof z.show === 'object' && z.show ? z.show : {});
   z.prvs = Array.isArray(z.prvs) ? z.prvs : [];
+  if (!z.dz || typeof z.dz.lat !== 'number') z.dz = null; // centre de la DZ (verticale terrain)
   z.axis = Object.assign({ on: false, mag: 0, both: true }, z.axis || {}); delete z.axis.ref;
   if (z.elevManual !== null && typeof z.elevManual !== 'number') z.elevManual = null;
   if (z.prvManual === undefined) z.prvManual = null;
@@ -203,6 +204,16 @@ const fmtInt = v => Math.round(v).toLocaleString('fr-FR');
 // ---------- Calcul du vecteur de largage ----------
 // Repère local centré sur le PRV utilisé (x = Est, y = Nord, en m). Le vent (u, v) est le sens où il souffle.
 const DH = 10; // pas d'intégration en hauteur (m)
+const NM = 1852;
+const fmtNm = m => (Math.round(m / NM * 10) / 10).toFixed(1).replace('.', ',');
+const CARD8 = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'];
+const card8 = dirTrue => CARD8[Math.round(n360(dirTrue - declCur()) / 45) % 8]; // point cardinal ou demi-point le plus proche (en magnétique)
+const AU8 = { N: 'au N', NE: 'au NE', E: "à l'E", SE: 'au SE', S: 'au S', SO: 'au SO', O: "à l'O", NO: 'au NO' };
+function dzText(sol) { // Henri : « 2,0 NM avant · décalé 0,2 NM au N », « Verticale · décalé 0,2 NM au N », « 0,5 NM après »
+  const d = sol && sol.dzInfo; if (!d) return '';
+  const a = Math.abs(d.along) / NM < 0.05 ? 'Verticale' : `${fmtNm(Math.abs(d.along))} NM ${d.along >= 0 ? 'avant' : 'après'}`;
+  return d.lat / NM < 0.05 ? a : `${a} · décalé ${fmtNm(d.lat)} NM ${AU8[card8(d.dir)]}`;
+}
 function prvCentroid(z) { const P = z.prvs; return { lat: P.reduce((a, p) => a + p.lat, 0) / P.length, lng: P.reduce((a, p) => a + p.lng, 0) / P.length }; }
 function elevOf(z, rec) { return typeof z.elevManual === 'number' ? z.elevManual : (rec && typeof rec.elev === 'number' ? rec.elev : (typeof z.elevAuto === 'number' ? z.elevAuto : 0)); }
 function driftBetween(prof, hTop, hBot, vsink) { // déplacement dû au vent en descendant de hTop à hBot à vsink m/s
@@ -396,6 +407,13 @@ function solve(z, prof, rec) {
       out.exits.n = Math.floor(out.length / sp + 1e-6) + 1;
     }
   }
+  // Centre de la DZ : distance du point vert avant la verticale (le long de l'axe) et décalage de l'axe (perpendiculaire), en nautiques
+  out.dzInfo = null;
+  if (z.dz) {
+    const D = Geo.toLocal(ch.prv, z.dz), along = (D.x - A.x) * u.x + (D.y - A.y) * u.y; // > 0 : la verticale est devant le vert
+    const P = { x: A.x + along * u.x, y: A.y + along * u.y }, off = { x: P.x - D.x, y: P.y - D.y }, lat = Math.hypot(off.x, off.y);
+    out.dzInfo = { along, lat, dir: lat > 1 ? n360(Math.atan2(off.x, off.y) * 180 / Math.PI) : null };
+  }
   out.ok = true; return out;
 }
 // Zone réelle de largage (avec les 15 s perpendiculaires, union des deux côtés) : « patatoïde », par rayons depuis son centre
@@ -452,7 +470,7 @@ map.on('rotate', () => { syncCompass(); current.bearing = map.getBearing(); clea
 
 const fig = L.layerGroup().addTo(map);
 const grads = L.layerGroup().addTo(map);
-let placing = null, posMarker = null; // placing : null | 'P' (PRV)
+let placing = null, posMarker = null; // placing : null | 'P' (PRV) | 'D' (centre de la DZ)
 const prvMarkers = {};
 let patPts = null, solKey = '', sol = null, prof = null, wxRec = null, relaxPts = null, relaxKey = '';
 
@@ -475,7 +493,7 @@ function compute() {
   const elev = elevOf(current, wxRec);
   prof = wxProfile(wxRec, current.when, elev);
   const key = JSON.stringify([current.id, current.when, current.prvs, current.params, current.axis, current.elevManual, current.prvManual,
-    current.headingOverride, current.reversed, current.offsetManual, current.tManual, elev, wxRec && wxRec.fetched, zeroWind]);
+    current.headingOverride, current.reversed, current.offsetManual, current.tManual, elev, wxRec && wxRec.fetched, zeroWind, current.dz]);
   if (key !== solKey) { sol = solve(current, prof, wxRec); solKey = key; }
   if (sol.ok) current.vector = { when: current.when, start: sol.start, end: sol.end, heading: sol.heading, length: Math.round(sol.length), decl: sol.decl, prv: sol.prv.id };
 }
@@ -587,8 +605,16 @@ function longPressAction(m, cb) {
   el.addEventListener('touchmove', mv, { passive: true }); el.addEventListener('mousemove', mv);
   ['touchend', 'touchcancel', 'mouseup', 'mouseleave'].forEach(ev => el.addEventListener(ev, cancel));
 }
-let vecHit = null, vecLabel = null;
+let vecHit = null, vecLabel = null, dzMarker = null;
+const dzIcon = L.divIcon({ className: 'dzc', iconSize: [30, 30], iconAnchor: [15, 15], html: '<span></span>' });
+function syncDzMarker() {
+  if (current.dz) {
+    if (!dzMarker) { dzMarker = L.marker(LL(current.dz), { icon: dzIcon, zIndexOffset: 700 }).addTo(map); longPressDrag(dzMarker, ll => { current.dz = ll; draw(true); }, () => { persist(); redraw(); fillInputs(); }); }
+    else if (!dzMarker._lpDragging) dzMarker.setLatLng(LL(current.dz));
+  } else if (dzMarker) { map.removeLayer(dzMarker); dzMarker = null; }
+}
 function placeMarkers() {
+  syncDzMarker();
   const usedId = sol && sol.prv ? sol.prv.id : null;
   Object.keys(prvMarkers).forEach(id => { if (!current.prvs.find(p => p.id === id)) { map.removeLayer(prvMarkers[id]); delete prvMarkers[id]; } });
   current.prvs.forEach(p => {
@@ -612,11 +638,14 @@ function placeMarkers() {
     const mid = labelPos();
     const ne = sol.exits ? sol.exits.n : 1;
     const dtx = sol.exits && sol.exits.dt ? ` · <b class="vexits">${fmt1(sol.exits.dt)} s</b>` : '';
-    const html = `<span><b class="vcap">${hdg(sol.heading)}</b> · ${fmtInt(sol.length)} m · <b class="vexits">${ne} sortie${ne > 1 ? 's' : ''}</b>${dtx}</span>`;
-    if (!vecLabel) { vecLabel = L.marker(LL(mid), { zIndexOffset: 1200, icon: L.divIcon({ className: 'vlabel', iconSize: [0, 0], html }) }).addTo(map); vecLabel._html = html; longPressAction(vecLabel, editHeading); }
-    else { vecLabel.setLatLng(LL(mid)); if (vecLabel._html !== html) { vecLabel.setIcon(L.divIcon({ className: 'vlabel', iconSize: [0, 0], html })); vecLabel._html = html; longPressAction(vecLabel, editHeading); } }
+    const dzl = dzText(sol);
+    const html = `<span><b class="vcap">${hdg(sol.heading)}</b> · ${fmtInt(sol.length)} m · <b class="vexits">${ne} sortie${ne > 1 ? 's' : ''}</b>${dtx}${dzl ? `<br><i class="vdz">Vert : ${dzl}</i>` : ''}</span>`;
+    if (!vecLabel) { vecLabel = L.marker(LL(mid), { zIndexOffset: 1200, icon: L.divIcon({ className: 'vlabel', iconSize: [0, 0], html }) }).addTo(map); vecLabel._html = html; }
+    else { vecLabel.setLatLng(LL(mid)); if (vecLabel._html !== html) { vecLabel.setIcon(L.divIcon({ className: 'vlabel', iconSize: [0, 0], html })); vecLabel._html = html; } }
     if (current.show.label === false) { if (map.hasLayer(vecLabel)) map.removeLayer(vecLabel); }
     else if (!map.hasLayer(vecLabel)) vecLabel.addTo(map);
+    // élément recréé par Leaflet quand le cartouche revient sur la carte : rebrancher l'appui long (même piège que le couloir PSV)
+    if (vecLabel.getElement() && vecLabel._lpEl !== vecLabel.getElement()) { vecLabel._lpEl = vecLabel.getElement(); longPressAction(vecLabel, editHeading); }
   } else {
     if (vecHit && map.hasLayer(vecHit.line)) map.removeLayer(vecHit.line);
     if (vecLabel && map.hasLayer(vecLabel)) map.removeLayer(vecLabel);
@@ -636,6 +665,7 @@ function labelPos() {
   return { lat: ll.lat, lng: ll.lng };
 }
 function resetMarkers() {
+  if (dzMarker) { map.removeLayer(dzMarker); dzMarker = null; }
   Object.keys(prvMarkers).forEach(id => { map.removeLayer(prvMarkers[id]); delete prvMarkers[id]; });
   if (vecHit && map.hasLayer(vecHit.line)) map.removeLayer(vecHit.line);
   if (vecLabel && map.hasLayer(vecLabel)) map.removeLayer(vecLabel);
@@ -680,6 +710,7 @@ function figurePoints() {
   // PRV : seulement s'ils sont dans le cercle de relaxation (sinon ils réduiraient trop le zoom)
   const inCircle = ll => { if (!sol.relax) return false; const q = Geo.toLocal(sol.prv, ll); return Math.hypot(q.x - sol.relax.c.x, q.y - sol.relax.c.y) <= sol.relax.R; };
   current.prvs.forEach(p => { if (inCircle(p)) pts.push({ lat: p.lat, lng: p.lng }); });
+  if (current.dz && inCircle(current.dz)) pts.push(current.dz);
   return pts;
 }
 function freeRect() {
@@ -715,6 +746,8 @@ function updateInfo() {
       (sol.canopyWind.spd >= sol.Va ? ' : impossible de remonter au vent sous voile, il faut ouvrir au vent du PRV' : '');
   } else if (sol && sol.err) t = sol.err;
   $('axisInfo').textContent = t;
+  $('dzInfo').textContent = current.dz ? (sol && sol.ok && sol.dzInfo ? 'Point vert : ' + dzText(sol) + '.' : 'Centre de la DZ placé.') : 'Pas encore de centre de DZ : les distances en nautiques ne s\'affichent pas.';
+  $('btnDzDel').classList.toggle('hidden', !current.dz);
   const ex = sol && sol.ok && sol.exits;
   // Panneau 🕑 volontairement court (Henri, 19/11/2026) : nombre de sorties et alerte vent sous voile ; le détail est dans l'onglet Zones (axisInfo)
   $('whyInfo').innerHTML = sol && sol.ok ? (ex && ex.dt ? `<b>${ex.n} sortie${ex.n > 1 ? 's' : ''}</b>, une toutes les <b>${ex.dt} s</b>.` : '') +
@@ -876,8 +909,22 @@ $('t_date').addEventListener('change', e => { if (e.target.value) setTWhen(e.tar
 $('t_hour').addEventListener('change', e => setTWhen(tWhen.slice(0, 11) + e.target.value + ':00'));
 
 // ---------- Placement des PRV : en touchant la carte ----------
-function syncPlaceBtn() { $('btnPlaceP').classList.toggle('on', placing === 'P'); }
-function placeBanner() { setBanner(placing === 'P' ? 'Touche la carte pour placer le point de rendez-vous.' : null); }
+function syncPlaceBtn() { $('btnPlaceP').classList.toggle('on', placing === 'P'); $('btnPlaceDZ').classList.toggle('on', placing === 'D'); }
+function placeBanner() { setBanner(placing === 'P' ? 'Touche la carte pour placer le point de rendez-vous.' : placing === 'D' ? 'Touche la carte pour placer le centre de la DZ (verticale terrain).' : null); }
+function setDz(p, how) { current.dz = { lat: p.lat, lng: p.lng }; persist(); fillInputs(); redraw(); toast(`Centre de la DZ placé ${how}. Appui long dessus pour le déplacer.`); }
+$('btnPlaceDZ').addEventListener('click', () => {
+  if (placing === 'D') { placing = null; placeBanner(); syncPlaceBtn(); return; }
+  if (!current.id) return toast('Crée d\'abord une zone (＋ Nouvelle zone)');
+  stopMeasure(); placing = 'D'; syncPlaceBtn(); placeBanner(); closeSheet();
+});
+$('btnDzGps').addEventListener('click', () => {
+  if (!current.id) return toast('Crée d\'abord une zone (＋ Nouvelle zone)');
+  if (!navigator.geolocation) return toast('Géolocalisation indisponible');
+  $('btnDzGps').textContent = '🛰 Recherche…';
+  navigator.geolocation.getCurrentPosition(pos => { $('btnDzGps').textContent = '🛰 Ma position (GPS)'; setDz({ lat: pos.coords.latitude, lng: pos.coords.longitude }, 'à ta position'); },
+    () => { $('btnDzGps').textContent = '🛰 Ma position (GPS)'; toast('Position refusée ou indisponible'); }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+});
+$('btnDzDel').addEventListener('click', async () => { if (!current.dz) return; if (!(await ask('Supprimer le centre de la DZ ?'))) return; current.dz = null; persist(); fillInputs(); redraw(); });
 $('btnPlaceP').addEventListener('click', () => {
   if (placing === 'P') { placing = null; placeBanner(); syncPlaceBtn(); return; }
   if (!current.id) return toast('Crée ou ouvre d\'abord une zone');
@@ -952,9 +999,9 @@ map.on('click', e => {
   if ((typeof Photo !== 'undefined') && Photo.onMapClick(e)) return; // calage d'une photo aérienne en cours
   if (!placing && meas.active) { measureClick({ lat: e.latlng.lat, lng: e.latlng.lng }); return; }
   if (!placing) return;
-  const p = { lat: e.latlng.lat, lng: e.latlng.lng };
+  const p = { lat: e.latlng.lat, lng: e.latlng.lng }, what = placing;
   placing = null; placeBanner(); syncPlaceBtn();
-  addPrv(p);
+  if (what === 'D') setDz(p, 'sur la carte'); else addPrv(p);
 });
 
 map.on('zoomend', redraw);
@@ -1388,6 +1435,8 @@ async function renderPdfCanvas() {
     if (fill) { g.fillStyle = fill; g.fill(); } g.strokeStyle = stroke; g.lineWidth = w * u; g.setLineDash(dash ? dash.map(d => d * u) : []); g.stroke(); g.restore(); };
   if (current.show.relax) { poly(relaxPolygon(sol), C_RELAX, null, 2.6); poly(patatoidPolygon(sol), C_RELAX, null, 2.2, [8, 6]); }
   // PDF = même dessin que la carte, juste plus épais pour l'impression : PRV de même taille, l'inactif en transparence
+  if (current.dz) { const c = toC(current.dz), r = 9 * u; g.save(); g.strokeStyle = '#000'; g.lineWidth = 5 * u; g.beginPath(); g.arc(c.x, c.y, r, 0, 2 * Math.PI); g.moveTo(c.x - 1.7 * r, c.y); g.lineTo(c.x + 1.7 * r, c.y); g.moveTo(c.x, c.y - 1.7 * r); g.lineTo(c.x, c.y + 1.7 * r); g.stroke();
+    g.strokeStyle = '#fff'; g.lineWidth = 2.4 * u; g.stroke(); g.restore(); } // centre de la DZ : même dessin qu'à l'écran
   current.prvs.forEach(p => { const used = sol.prv && p.id === sol.prv.id; g.save(); g.globalAlpha = used ? 1 : 0.5; dot(p, used ? C_PRVUSED : C_PRV, 9); g.restore(); });
   { const a = toC(sol.start), b = toC(sol.end);
     g.save(); g.lineCap = 'round'; g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 10 * u; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
@@ -1432,7 +1481,7 @@ async function renderPdfCanvas() {
   tx(`${current.name}`, col1, l0, '#fff', fs * 1.3, true);
   tx(`Saut du ${fmtWhen(current.when).replace(' ', ' à ')} · ${wxRec ? wxRec.model : ''}`, col1, l0 + lh * 1.2, '#bbb');
   const exP = sol.exits || { n: 1 };
-  tx(`Vecteur ${hdg(sol.heading)} · ${fmtInt(sol.length)} m`, col1, l0 + lh * 2.4, '#fff', fs, true);
+  tx(`Vecteur ${hdg(sol.heading)} · ${fmtInt(sol.length)} m${sol.dzInfo ? ' · vert : ' + dzText(sol) : ''}`, col1, l0 + lh * 2.4, '#fff', fs, true);
   tx(`${exP.n} sortie${exP.n > 1 ? 's' : ''}${exP.dt ? ` · une toutes les ${fmt1(exP.dt)} s (${fmtInt(exP.s)} m au sol, séparation ${exP.sep} m)` : ''}`, col1, l0 + lh * 3.4, C_PRVUSED, fs, true);
   tx(`Largage FL${Math.round(sol.flRel)} = ${fmtInt(sol.hRel)} m sol · ouverture ${fmtInt(p.hOpen)} m sol`, col1, l0 + lh * 4.4, C_END, fs, true);
   tx(`PRV ${sol.prvAuto ? 'automatique' : 'choisi à la main'} · ${sol.why}${current.reversed ? ' · sens inversé' : ''}`, col1, l0 + lh * 5.4, '#ffd400', fs);
