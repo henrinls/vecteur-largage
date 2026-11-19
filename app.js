@@ -4,7 +4,7 @@ window.addEventListener('error', e => {
   const t = document.getElementById('toast');
   if (t) { t.textContent = 'Erreur : ' + (e.message || 'inconnue') + ' — ferme et rouvre l\'appli'; t.classList.remove('hidden'); }
 });
-const VERSION = '0.4.5';
+const VERSION = '0.5.0';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -15,10 +15,10 @@ const TILE_CACHE = 'vl-tiles-v1';
 // Paramètres : les « hypothèses » (valeurs arbitraires, réglables) et les réglages d'utilisation (à chaque saut)
 const DEFAULT_PARAMS = {
   vff: 50, openLoss: 100, perpTime: 15, vz: 4, glide: 2.5, hMin: 300, margin: 20, sep: 300,   // hypothèses (margin : marge de sécurité en % ; sep : séparation mini entre sorties, m)
-  acMs: 36.0,                                                            // vitesse de largage de l'avion, badin (m/s, 70 kt : Pilatus PC-6)
+  acMs: 36.0, acType: 'pc6',                                             // avion et vitesse de largage, badin (m/s ; 70 kt : Pilatus PC-6)
   hOpen: 1500, relMode: 'FL', relFL: 140, relAGL: 4000                   // utilisation
 };
-const PROFILE_KEYS = ['vff', 'openLoss', 'perpTime', 'vz', 'glide', 'hMin', 'margin', 'sep', 'acMs', 'hOpen', 'relMode', 'relFL', 'relAGL'];
+const PROFILE_KEYS = ['vff', 'openLoss', 'perpTime', 'vz', 'glide', 'hMin', 'margin', 'sep', 'acMs', 'acType', 'hOpen', 'relMode', 'relFL', 'relAGL'];
 const C_START = '#1ec83c', C_END = '#ff2020', C_PRV = '#ffd400', C_PRVUSED = '#ff8c00', C_RELAX = '#00e5ff';
 const isDark = c => c === '#000000';
 const KT = 1.943844; // m/s → nœuds
@@ -683,7 +683,7 @@ function updateInfo() {
   $('axisInfo').textContent = t;
   const ex = sol && sol.ok && sol.exits;
   $('whyInfo').innerHTML = sol && sol.ok ? (ex && ex.dt ? `<b>${ex.n} sortie${ex.n > 1 ? 's' : ''}</b> : une toutes les <b>${fmt1(ex.dt)} s</b> (${fmtInt(ex.s)} m au sol, vitesse sol de l'avion ${Math.round(ex.Vg * KT)} kt) pour rester à ${ex.sep} m les uns des autres. ` : '') +
-    `Avion : ${Math.round(sol.tas * KT)} kt de vitesse vraie à FL${Math.round(sol.flRel)} (${Math.round(current.params.acMs * KT)} kt badin). Chute libre : projection ${fmtInt(sol.throwDist)} m + dérive, au total <b>${fmtDist(Math.hypot(sol.dFF.x, sol.dFF.y))}</b> vers le ${hdg(n360(Math.atan2(sol.dFF.x, sol.dFF.y) * 180 / Math.PI))}. ` +
+    `${acName()} : ${Math.round(sol.tas * KT)} kt de vitesse vraie à FL${Math.round(sol.flRel)} (${Math.round(current.params.acMs * KT)} kt badin). Chute libre : projection ${fmtInt(sol.throwDist)} m + dérive, au total <b>${fmtDist(Math.hypot(sol.dFF.x, sol.dFF.y))}</b> vers le ${hdg(n360(Math.atan2(sol.dFF.x, sol.dFF.y) * 180 / Math.PI))}. ` +
     `Sous voile : vent moyen <b>${Math.round(sol.canopyWind.spd * KT)} kt</b> pour ${Math.round(sol.Va * KT)} kt de vitesse propre` +
     (sol.canopyWind.spd >= sol.Va ? ' <b class="warn">→ tu ne remontes pas au vent : il faut ouvrir au vent du PRV.</b>' : '.') : '';
   $('elevAuto').textContent = typeof current.elevAuto === 'number' ? `automatique : ${current.elevAuto} m` : 'automatique : inconnue (pas encore de prévision)';
@@ -722,14 +722,24 @@ HYP.concat(['hOpen']).forEach(k => {
   $('p_' + k).addEventListener('input', e => { const v = numIn(e.target); if (isNaN(v)) return; setParam(k, v); persist(); redraw(); });
   $('p_' + k).addEventListener('blur', () => fillInputs(true));
 });
+// Avion : vitesses de largage (badin, nœuds) ; « Saisie manuelle » pour une autre valeur
+const AIRCRAFT = { pc6: ['Pilatus PC-6', 70], c208: ['Cessna Caravan', 85], dhc6: ['Twin Otter', 85], cn235: ['CASA CN235', 110], a400: ['A400M / C-130J', 130] };
+const acName = () => { const t = AIRCRAFT[current.params.acType]; return t && Math.round(current.params.acMs * KT) === t[1] ? t[0] : 'Avion'; };
+$('p_acType').addEventListener('change', e => {
+  const t = e.target.value; setParam('acType', t);
+  if (AIRCRAFT[t]) setParam('acMs', Math.round(AIRCRAFT[t][1] / KT * 10) / 10);
+  current.offsetManual = null; persist(); redraw(); fillAc();
+});
 // Vitesse de largage de l'avion : nœuds et m/s liés (stockée en m/s)
 function fillAc() {
   const ms = +current.params.acMs || 0;
+  const ty = AIRCRAFT[current.params.acType];
+  $('p_acType').value = ty && Math.round(ms * KT) === ty[1] ? current.params.acType : 'manual'; // vitesse modifiée à la main → « Saisie manuelle »
   if (document.activeElement !== $('p_acKt')) $('p_acKt').value = Math.round(ms * KT);
   if (document.activeElement !== $('p_acMs')) $('p_acMs').value = fmt1(ms);
 }
-$('p_acKt').addEventListener('change', e => { const v = numIn(e.target); if (isNaN(v)) return; setParam('acMs', Math.round(v / KT * 10) / 10); current.offsetManual = null; persist(); redraw(); fillAc(); });
-$('p_acMs').addEventListener('change', e => { const v = numIn(e.target); if (isNaN(v)) return; setParam('acMs', v); current.offsetManual = null; persist(); redraw(); fillAc(); });
+$('p_acKt').addEventListener('change', e => { const v = numIn(e.target); if (isNaN(v)) return; setParam('acType', 'manual'); setParam('acMs', Math.round(v / KT * 10) / 10); current.offsetManual = null; persist(); redraw(); fillAc(); });
+$('p_acMs').addEventListener('change', e => { const v = numIn(e.target); if (isNaN(v)) return; setParam('acType', 'manual'); setParam('acMs', v); current.offsetManual = null; persist(); redraw(); fillAc(); });
 ['p_acKt', 'p_acMs'].forEach(id => $(id).addEventListener('keydown', e => { if (e.key === 'Enter') e.target.blur(); }));
 function setRel(mode, v) { if (isNaN(v)) return; setParam('relMode', mode); setParam(mode === 'FL' ? 'relFL' : 'relAGL', v); current.offsetManual = null; persist(); redraw(); setTimeout(() => fillInputs(true), 0); }
 ['p_relFL', 'j_relFL'].forEach(id => $(id).addEventListener('change', e => setRel('FL', numIn(e.target))));
@@ -1379,7 +1389,7 @@ async function renderPdfCanvas() {
   tx(`Largage FL${Math.round(sol.flRel)} = ${fmtInt(sol.hRel)} m sol · ouverture ${fmtInt(p.hOpen)} m sol`, col1, l0 + lh * 4.4, C_END, fs, true);
   tx(`PRV ${sol.prvAuto ? 'automatique' : 'choisi à la main'} · ${sol.why}${current.reversed ? ' · sens inversé' : ''}`, col1, l0 + lh * 5.4, '#ffd400', fs);
   [
-    `Vent de largage : ${hdg(sol.windRel.dir)} ${Math.round(sol.windRel.spd * KT)} kt (${fmt1(sol.windRel.spd)} m/s) · avion ${Math.round(p.acMs * KT)} kt badin (${Math.round(sol.tas * KT)} kt vraie)`,
+    `Vent de largage : ${hdg(sol.windRel.dir)} ${Math.round(sol.windRel.spd * KT)} kt (${fmt1(sol.windRel.spd)} m/s) · ${acName()} ${Math.round(p.acMs * KT)} kt badin (${Math.round(sol.tas * KT)} kt vraie)`,
     `Chute ${p.vff} m/s · perte à l'ouverture ${p.openLoss} m`,
     `${p.perpTime} s perpendiculaire · Vz ${fmt1(+p.vz)} m/s · finesse ${fmt1(+p.glide)}`,
     `Arrivée au PRV à ${p.hMin} m minimum · marge de sécurité ${sol.margin} % · terrain ${Math.round(sol.elev)} m`,
