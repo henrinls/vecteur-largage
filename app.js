@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.13.0';
+const VERSION = '0.14.0';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -1590,53 +1590,60 @@ $('pdfShare').addEventListener('click', async () => {
 });
 
 
-// ---------- Sauvegarde ----------
-// Exporter : fichier .json (zones + paramètres) proposé à la feuille de partage (Fichiers, AirDrop, mail…).
-$('btnExport').addEventListener('click', async () => {
-  persist();
-  const data = JSON.stringify({ app: 'vecteur-largage', v: 3, exported: new Date().toISOString(), profile, zones }, null, 1);
-  const name = `${dateStamp()}_Vecteur_Largage_zones.json`;
-  const file = new File([data], name, { type: 'application/json' });
+// ---------- Sauvegarde (20 nov. 2026) : zones et paramètres dans deux fichiers séparés ----------
+// Donner ses zones à quelqu'un ne touche jamais à sa paramètres : onglet Zones = fichier des zones, onglet Paramètres = fichier de les paramètres.
+// Nom du fichier : AAAAMMJJ_Vecteur_Largage_<Zones|Parametres>_<Prénom>.json — le prénom est demandé à l'export (le dernier est proposé).
+async function shareJson(obj, name) {
+  const file = new File([JSON.stringify(obj, null, 1)], name, { type: 'application/json' });
   try {
     if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file] }); /* sans title : iOS en ferait un .txt en plus */
     else { const url = URL.createObjectURL(file); const a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000); }
   } catch (e) { if (e && e.name !== 'AbortError') toast('Export impossible'); }
+}
+async function exportKind(kind) {
+  persist();
+  const n = await ask('Ton prénom (il sera dans le nom du fichier, pour savoir de qui il vient) :', store.get('vl.author', ''));
+  if (n === null) return;
+  const who = String(n).trim(); store.set('vl.author', who);
+  const obj = { app: 'vecteur-largage', kind, v: 4, exported: new Date().toISOString(), author: who };
+  if (kind === 'zones') obj.zones = zones; else obj.profile = profile;
+  await shareJson(obj, `${dateStamp()}_Vecteur_Largage_${kind === 'zones' ? 'Zones' : 'Parametres'}${who ? '_' + safeName(who) : ''}.json`);
+}
+async function readJsonFile(input) {
+  const f = input.files && input.files[0]; if (!f) return null;
+  try { return JSON.parse(await f.text()); } catch (er) { toast('Fichier illisible'); return null; }
+}
+const fromWho = d => d && d.author ? ` de ${d.author}` : '';
+$('btnExportZones').addEventListener('click', () => exportKind('zones'));
+$('btnExportProf').addEventListener('click', () => exportKind('profile'));
+$('btnImportZones').addEventListener('click', () => { $('importZonesFile').value = ''; $('importZonesFile').click(); });
+$('btnImportProf').addEventListener('click', () => { $('importProfFile').value = ''; $('importProfFile').click(); });
+// Importer des zones : toujours une fusion, jamais d'écrasement. Une zone déjà présente (même zone) reste telle quelle.
+// Les zones importées prennent TA paramètres. Pour repartir d'un fichier, effacer d'abord les zones puis importer.
+$('importZonesFile').addEventListener('change', async e => {
+  const d = await readJsonFile(e.target); if (!d) return;
+  if (!Array.isArray(d.zones)) { toast(d.profile ? 'Ce fichier contient des paramètres : importe-le depuis l\'onglet Paramètres' : 'Fichier illisible'); return; }
+  let added = 0, kept = 0;
+  d.zones.map(upgrade).forEach(z => {
+    if (!z.id) z.id = 'z' + Date.now() + Math.random().toString(36).slice(2, 6);
+    if (zones.some(x => x.id === z.id)) { kept++; return; }
+    applyProfile(z); zones.push(z); added++;
+  });
+  store.set('vl.zones', zones); renderZones(); redraw();
+  toast(`Zones${fromWho(d)} : ${added} ajoutée(s)${kept ? `, ${kept} déjà présente(s) gardée(s) telles quelles` : ''}`);
 });
-// Importer : ajoute les zones du fichier à celles déjà là (fusion, rien n'est effacé).
-// Même zone des deux côtés → on garde la version la plus récente. Si l'appli est vide, on reprend aussi la manœuvre du fichier.
-$('btnImport').addEventListener('click', () => { $('importFile').value = ''; $('importFile').click(); });
-$('importFile').addEventListener('change', async e => {
-  const f = e.target.files && e.target.files[0]; if (!f) return;
-  try {
-    const d = JSON.parse(await f.text());
-    if (!Array.isArray(d.zones)) throw new Error('format');
-    const wasEmpty = zones.length === 0;
-    // Le fichier contient zones + paramètres : les paramètres sont repris aussi (20 nov. 2026) ; question seulement si elle diffère de la tienne et que tu as déjà des zones
-    let tookProfile = false;
-    if (d.profile && typeof d.profile === 'object') {
-      const diff = PROFILE_KEYS.some(k => d.profile[k] !== undefined && JSON.stringify(d.profile[k]) !== JSON.stringify(profile[k]));
-      if (diff && (wasEmpty || await ask('Le fichier contient aussi des paramètres différents des tiens. Les reprendre ? (ils remplacent tes réglages actuels ; Annuler = garder les tiens, les zones sont importées quand même)'))) {
-        PROFILE_KEYS.forEach(k => { if (d.profile[k] !== undefined) profile[k] = d.profile[k]; }); store.set('vl.profile', profile); tookProfile = true;
-      }
-    }
-    let added = 0, updated = 0;
-    d.zones.map(upgrade).forEach(z => {
-      if (!z.id) z.id = 'z' + Date.now() + Math.random().toString(36).slice(2, 6);
-      applyProfile(z);
-      const i = zones.findIndex(x => x.id === z.id);
-      if (i < 0) { zones.push(z); added++; }
-      else if ((z.updated || 0) > (zones[i].updated || 0)) { zones[i] = z; updated++; }
-    });
-    store.set('vl.zones', zones);
-    if (tookProfile) { zones.forEach(applyProfile); store.set('vl.zones', zones); applyProfile(current); persist(); fillInputs(); }
-    renderZones(); redraw();
-    toast(`Import : ${added} zone(s) ajoutée(s)${updated ? `, ${updated} mise(s) à jour` : ''}${tookProfile ? ' · paramètres repris' : ''}`);
-  } catch (er) { toast('Fichier illisible'); }
+// Importer des paramètres : remplace tes paramètres (on n'en a qu'une) ; les zones ne bougent pas.
+$('importProfFile').addEventListener('change', async e => {
+  const d = await readJsonFile(e.target); if (!d) return;
+  if (!d.profile || typeof d.profile !== 'object') { toast(Array.isArray(d.zones) ? 'Ce fichier contient des zones : importe-le depuis l\'onglet Zones' : 'Fichier illisible'); return; }
+  PROFILE_KEYS.forEach(k => { if (d.profile[k] !== undefined) profile[k] = d.profile[k]; }); store.set('vl.profile', profile);
+  zones.forEach(applyProfile); store.set('vl.zones', zones); applyProfile(current); persist(); fillInputs(); redraw();
+  toast(`Paramètres${fromWho(d)} importés`);
 });
-// Tout effacer (zones, paramètres, zone en cours, prévisions) — les photos gardées hors-ligne restent.
+// Effacer : les zones seulement (et la zone en cours) — les paramètres sont gardés (pas de bouton pour l'effacer : la modifier à la main).
 $('btnWipe').addEventListener('click', async () => {
-  if (!(await ask('Effacer TOUTES les données (zones enregistrées, paramètres, zone en cours, prévisions) ? C\'est définitif. Pense à exporter avant si besoin.'))) return;
-  Object.keys(localStorage).filter(k => k.startsWith('vl.')).forEach(k => { try { localStorage.removeItem(k); } catch (er) {} });
+  if (!(await ask('Effacer TOUTES les zones enregistrées (et la zone en cours) ? C\'est définitif. Tes paramètres sont gardés. Pense à exporter les zones avant si besoin.'))) return;
+  Object.keys(localStorage).filter(k => k.startsWith('vl.') && !/^vl\.(profile|author|lastParams|mig\.)/.test(k)).forEach(k => { try { localStorage.removeItem(k); } catch (er) {} });
   if ((typeof Photo !== 'undefined')) await Photo.clearAll();
   location.reload();
 });

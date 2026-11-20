@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>vecteur-largage</title>
 <link rel="stylesheet" href="vendor/leaflet.css">
-<link rel="stylesheet" href="style.css?v=0.13.0">
+<link rel="stylesheet" href="style.css?v=0.14.0">
 </head>
 <body>
 <div id="map"></div>
@@ -135,14 +135,14 @@
     <div class="row"><button id="btnPdf" class="wide primary">📄 PDF A4</button></div>
     <p class="hint">Page 1 : carte, vecteur vers le haut, PRV et zone de relaxation. Page 2 : tableau des vents à l'heure du saut.</p>
 
-    <h3>Sauvegarde</h3>
+    <h3>Sauvegarde des zones</h3>
     <div class="row grid2">
-      <button id="btnExport" class="wide">⬆︎ Exporter (fichier)</button>
-      <button id="btnImport" class="wide">⬇︎ Importer (fichier)</button>
+      <button id="btnExportZones" class="wide">⬆︎ Exporter les zones</button>
+      <button id="btnImportZones" class="wide">⬇︎ Importer des zones</button>
     </div>
-    <input type="file" id="importFile" accept=".json,application/json" class="hidden">
-    <div class="row"><button id="btnWipe" class="wide danger">🗑 Effacer toutes les données</button></div>
-    <p class="hint">Exporter crée un fichier avec toutes tes zones et tes paramètres (à garder dans Fichiers, envoyer par AirDrop ou mail…). Importer ajoute les zones d'un tel fichier à celles déjà enregistrées, sans en effacer, et reprend ses paramètres (question s'ils diffèrent des tiens). Version <span id="ver"></span></p>
+    <input type="file" id="importZonesFile" accept=".json,application/json" class="hidden">
+    <div class="row"><button id="btnWipe" class="wide danger">🗑 Effacer toutes les zones</button></div>
+    <p class="hint">Exporter crée un fichier avec toutes tes zones (ton prénom est demandé, il apparaît dans le nom du fichier) : à garder dans Fichiers, envoyer par AirDrop ou mail… Importer ajoute les zones d'un tel fichier aux tiennes, sans jamais en modifier ni en effacer ; elles prennent tes paramètres. Pour repartir d'un fichier : effacer les zones, puis importer. Tes paramètres sont dans l'onglet Paramètres, sauvegardés à part. Version <span id="ver"></span></p>
   </div>
 
   <div id="tab-params" class="tab hidden">
@@ -188,6 +188,13 @@
       <div><label>Séparation mini entre sorties (m)</label><input id="p_sep" inputmode="decimal"></div>
     </div>
     <p class="hint">Après l'ouverture : vol perpendiculaire à l'axe, du meilleur côté (sauf le dernier para, qui n'a personne derrière lui), puis route directe vers le PRV (dérive corrigée en crabe). Le vecteur est le plus long segment de l'axe d'où chacun peut rejoindre le PRV à la hauteur minimum.</p>
+    <h3>Sauvegarde des paramètres</h3>
+    <div class="row grid2">
+      <button id="btnExportProf" class="wide">⬆︎ Exporter les paramètres</button>
+      <button id="btnImportProf" class="wide">⬇︎ Importer des paramètres</button>
+    </div>
+    <input type="file" id="importProfFile" accept=".json,application/json" class="hidden">
+    <p class="hint">Fichier séparé des zones (prénom dans le nom du fichier). Importer des paramètres remplace les tiens et s'applique à toutes tes zones ; les zones ne changent pas.</p>
   </div>
 
 </section>
@@ -226,12 +233,12 @@
 
 <div id="toast" class="hidden"></div>
 
-<script src="vendor/leaflet.js?v=0.13.0"></script>
-<script src="vendor/leaflet-rotate.js?v=0.13.0"></script>
-<script src="geo.js?v=0.13.0"></script>
-<script src="clubs.js?v=0.13.0"></script>
-<script src="wmm.js?v=0.13.0"></script>
-<script src="app.js?v=0.13.0"></script>
-<script src="photo.js?v=0.13.0"></script>
+<script src="vendor/leaflet.js?v=0.14.0"></script>
+<script src="vendor/leaflet-rotate.js?v=0.14.0"></script>
+<script src="geo.js?v=0.14.0"></script>
+<script src="clubs.js?v=0.14.0"></script>
+<script src="wmm.js?v=0.14.0"></script>
+<script src="app.js?v=0.14.0"></script>
+<script src="photo.js?v=0.14.0"></script>
 </body>
 </html>
