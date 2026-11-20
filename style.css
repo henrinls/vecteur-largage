@@ -187,3 +187,10 @@ button,input,select,label,a{touch-action:manipulation}
 
 /* Deux boutons côte à côte : même hauteur, même si l'un a son texte sur deux lignes (ex. Fermer / Partager-Enregistrer) */
 .grid2>button{align-self:stretch}
+
+/* Transparence du fond de carte (20 nov. 2026) : curseur horizontal en bas, à gauche des boutons de zoom ; ☀ = fond noir ou blanc */
+#fadeBox{position:fixed;z-index:950;display:flex;align-items:center;gap:8px;padding:4px 8px 4px 4px;border-radius:12px;background:rgba(20,20,20,.7)}
+#fadeBg{width:34px;height:34px;padding:0;border-radius:50%;font-size:20px;line-height:1;display:flex;align-items:center;justify-content:center;touch-action:manipulation}
+#fadeBg.black{background:#fff;color:#000;border:2px solid #000}   /* vers le noir : soleil en couleurs inversées */
+#fadeBg.white{background:#222;color:#fff;border:2px solid #fff}   /* vers le blanc : soleil blanc */
+#fadeRange{width:130px;margin:0;accent-color:#ddd;touch-action:none}
