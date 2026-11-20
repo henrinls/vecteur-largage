@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.16.5';
+const VERSION = '0.16.6';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -47,8 +47,9 @@ function wxSource(date) {
 function wxUrl(lat, lng, date, src, minimal) {
   const v = [];
   (minimal ? [10] : src.hlev).forEach(h => v.push(`wind_speed_${h}m`, `wind_direction_${h}m`));
-  v.push('temperature_2m'); if (!minimal && src.kind === 'mf') [20, 50, 100, 150, 200].forEach(h => v.push(`temperature_${h}m`));
-  PLEV.forEach(p => v.push(`wind_speed_${p}hPa`, `wind_direction_${p}hPa`, `temperature_${p}hPa`, `geopotential_height_${p}hPa`));
+  v.push('temperature_2m'); if (!minimal) v.push('relative_humidity_2m'); // humidité : pas dans la requête allégée (secours si refusée)
+  if (!minimal && src.kind === 'mf') [20, 50, 100, 150, 200].forEach(h => v.push(`temperature_${h}m`));
+  PLEV.forEach(p => v.push(`wind_speed_${p}hPa`, `wind_direction_${p}hPa`, `temperature_${p}hPa`, `geopotential_height_${p}hPa`, ...(minimal ? [] : [`relative_humidity_${p}hPa`])));
   return `${src.base}?latitude=${lat.toFixed(4)}&longitude=${lng.toFixed(4)}&hourly=${v.join(',')}&models=${src.models}` +
     `&wind_speed_unit=ms&timezone=auto&start_date=${date}&end_date=${date}`;
 }
@@ -83,14 +84,14 @@ function wxProfileRaw(rec, when, elevUsed) {
   const lv = [];
   const add = (h, spd, dir, T, extra) => { if (spd == null || dir == null) return; const a = dir * Math.PI / 180; lv.push(Object.assign({ h, spd, dir, T, u: -spd * Math.sin(a), v: -spd * Math.cos(a) }, extra || {})); };
   const hl = Object.keys(H).filter(k => /^wind_speed_\d+m$/.test(k)).map(k => +k.match(/\d+/)[0]).sort((a, b) => a - b);
-  hl.forEach(h => add(h, val(`wind_speed_${h}m`), val(`wind_direction_${h}m`), val(h === 10 ? 'temperature_2m' : `temperature_${h}m`)));
+  hl.forEach(h => add(h, val(`wind_speed_${h}m`), val(`wind_direction_${h}m`), val(h === 10 ? 'temperature_2m' : `temperature_${h}m`), { RH: h === 10 ? val('relative_humidity_2m') : null }));
   const topH = lv.length ? lv[lv.length - 1].h : 0;
   const pz = [];
   PLEV.forEach(p => {
     const z = val(`geopotential_height_${p}hPa`); if (z == null) return;
     pz.push({ p, z });
     const h = z - elevUsed;
-    if (h > topH + 30) add(h, val(`wind_speed_${p}hPa`), val(`wind_direction_${p}hPa`), val(`temperature_${p}hPa`), { p });
+    if (h > topH + 30) add(h, val(`wind_speed_${p}hPa`), val(`wind_direction_${p}hPa`), val(`temperature_${p}hPa`), { p, RH: val(`relative_humidity_${p}hPa`) });
   });
   lv.sort((a, b) => a.h - b.h); pz.sort((a, b) => b.p - a.p);
   return lv.length ? { lv, pz, elev: elevUsed, model: rec.model, fetched: rec.fetched } : null;
@@ -978,12 +979,12 @@ function renderWinds() {
   if (!pr) { tb.innerHTML = '<tr><td colspan="6" class="mut">Pas de donnée pour cette heure.</td></tr>'; return; }
   windRows(pr, elev).forEach(r => {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${r.lab}</td><td>${fmtInt(r.h)} m</td><td>${hdgN(r.dir)}</td><td>${Math.round(r.spd * KT)} kt</td><td>${fmt1(r.spd)} m/s</td><td>${r.T == null ? '–' : Math.round(r.T) + ' °C'}</td>`; // unité à côté de chaque chiffre
+    tr.innerHTML = `<td>${r.lab}</td><td>${fmtInt(r.h)} m</td><td>${hdgN(r.dir)}</td><td>${Math.round(r.spd * KT)} kt</td><td>${fmt1(r.spd)} m/s</td><td>${r.T == null ? '–' : Math.round(r.T) + ' °C'}</td><td>${r.RH == null ? '–' : Math.round(r.RH) + ' %'}</td>`; // unité à côté de chaque chiffre
     tb.append(tr);
   });
 }
 function windRows(pr, elev) { // une ligne par tranche de 1 000 ft (FL), de la surface à ~10 000 m sol
-  const rows = [], add = (lab, h) => { const w = spdDir(windAt(pr, h)); rows.push({ lab, h, dir: w.dir, spd: w.spd, T: tempAt(pr, h) }); };
+  const rows = [], add = (lab, h) => { const w = spdDir(windAt(pr, h)); rows.push({ lab, h, dir: w.dir, spd: w.spd, T: tempAt(pr, h), RH: (() => { const q = pr.lv.filter(l => l.RH != null); return q.length ? interpLv({ lv: q }, h, 'RH') : null; })() }); /* humidité : seulement entre les niveaux qui en ont */ };
   add('Sol (10 m)', 10);
   const fl0 = Math.ceil(aglToFl(30, pr, elev) / 10) * 10;
   for (let fl = Math.max(10, fl0); fl <= 400; fl += 10) { const h = flToAgl(fl, pr, elev); if (h > 10000) break; if (h > 20) add('FL' + String(fl).padStart(3, '0'), h); }
@@ -1644,12 +1645,12 @@ function pdfWindsPage(doc) {
   doc.text(`Vents – ${current.name} – ${fmtWhen(current.when).replace(' ', ' à ')}`, 15, 18);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
   doc.text(`${wxRec.model} via Open-Meteo, téléchargée le ${new Date(wxRec.fetched).toLocaleString('fr-FR')} · terrain ${Math.round(elev)} m`, 15, 25);
-  const cols = [['Niveau', 15], ['Hauteur sol', 45], ['Vient du (M)', 85], ['Vitesse', 115], ['', 140], ['Temp.', 165]];
+  const cols = [['Niveau', 15], ['Hauteur sol', 42], ['Axe (M)', 78], ['Force', 102], ['', 124], ['Temp.', 152], ['Hum.', 177]];
   let y = 35; doc.setFont('helvetica', 'bold'); doc.setFontSize(10); cols.forEach(([t, x]) => doc.text(t, x, y)); doc.setFont('helvetica', 'normal');
   windRows(prof, elev).forEach((r, i) => {
     y += 6.6; if (y > 285) { doc.addPage('a4', 'portrait'); y = 20; }
     if (i % 2 === 0) { doc.setFillColor(238, 238, 238); doc.rect(13, y - 4.6, 184, 6.4, 'F'); }
-    [r.lab, fmtInt(r.h).replace(/[\u202f\u00a0]/g, ' ') + ' m', hdgN(r.dir), Math.round(r.spd * KT) + ' kt', fmt1(r.spd) + ' m/s', r.T == null ? '–' : Math.round(r.T) + ' °C'].forEach((t, k) => doc.text(t, cols[k][1], y));
+    [r.lab, fmtInt(r.h).replace(/[\u202f\u00a0]/g, ' ') + ' m', hdgN(r.dir), Math.round(r.spd * KT) + ' kt', fmt1(r.spd) + ' m/s', r.T == null ? '–' : Math.round(r.T) + ' °C', r.RH == null ? '–' : Math.round(r.RH) + ' %'].forEach((t, k) => doc.text(t, cols[k][1], y));
   });
 }
 
