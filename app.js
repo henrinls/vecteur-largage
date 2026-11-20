@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.14.2';
+const VERSION = '0.14.3';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -787,7 +787,7 @@ function updateInfo() {
   // Panneau 🕑 volontairement court (Henri, 19/11/2026) : nombre de sorties et alerte vent sous voile ; le détail est dans l'onglet Zones (axisInfo)
   $('whyInfo').innerHTML = sol && sol.ok ? (ex && ex.dt ? `<b>${ex.n} sortie${ex.n > 1 ? 's' : ''}</b>, une toutes les <b>${ex.dt} s</b>.` : '') +
     (sol.canopyWind.spd >= sol.Va ? ' <b class="warn">Vent sous voile plus fort que la voile : ouvrir au vent du PRV.</b>' : '') : '';
-  $('elevAuto').textContent = typeof current.elevAuto === 'number' ? `automatique : ${current.elevAuto} m` : 'automatique : inconnue (pas encore de prévision)';
+  $('elevAuto').textContent = (typeof current.elevAuto === 'number' ? `automatique : ${current.elevAuto} m (${Math.round(current.elevAuto / 0.3048)} ft)` : 'automatique : inconnue (pas encore de prévision)') + (typeof current.elevManual === 'number' ? ` · retenue : ${current.elevManual} m (${Math.round(current.elevManual / 0.3048)} ft)` : ''); // même affichage dans les 3 applis
 }
 
 // ---------- Interface ----------
