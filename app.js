@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.14.0';
+const VERSION = '0.14.1';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -730,8 +730,12 @@ function figurePoints() {
 function freeRect() {
   // marges serrées (20 nov. 2026) : la figure remplit l'écran, ses bords peuvent frôler les boutons
   const W = map.getSize().x, H = map.getSize().y, m = 4;
-  const top = $('top').getBoundingClientRect(), quick = $('quick').getBoundingClientRect();
-  return { l: Math.max(m, quick.right + m), t: Math.max(m, top.bottom + m), r: W - 6, b: H - 22 };
+  const quick = $('quick').getBoundingClientRect(), l = Math.max(m, quick.right + m), r = W - 6;
+  // haut : seuls les boutons du haut situés au-dessus de la zone libre comptent (en paysage, Manœuvre/Zones sont
+  // au-dessus de la colonne de gauche : la figure peut monter jusqu'au bas des boutons ronds N/AXE/⤢/⌖)
+  let t = m;
+  document.querySelectorAll('#top button').forEach(el => { const q = el.getBoundingClientRect(); if (q.width && q.right > l && q.left < r) t = Math.max(t, q.bottom + m); });
+  return { l, t, r, b: H - 22 };
 }
 // Étiquettes (degrés, chiffres, hauteurs…) : leur débord en pixels au-delà de la figure est réservé en plus,
 // sinon le cadrage serré les cache sous les boutons (« 180° » devenu « 80° », 20 nov. 2026)
