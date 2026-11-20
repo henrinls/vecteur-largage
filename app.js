@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.16.3';
+const VERSION = '0.16.4';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -1039,19 +1039,20 @@ function fmtDist(m) { return m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toF
 function measBox(t) { const b = $('measureBox'); if (!t) b.classList.add('hidden'); else { b.innerHTML = t; b.classList.remove('hidden'); } }
 function stopMeasure() {
   Object.assign(meas, { active: false, a: null, b: null, ma: null, mb: null, line: null, halo: null, lbl: null });
+  map.getContainer().classList.remove('measuring');
   measLayer.clearLayers(); measBox(null); $('qMeasure').classList.remove('on');
 }
 $('qMeasure').addEventListener('click', () => {
   if (meas.active) { stopMeasure(); return; }
   if (placing) return toast('Termine d\'abord le placement en cours');
-  meas.active = true; $('qMeasure').classList.add('on');
+  meas.active = true; $('qMeasure').classList.add('on'); map.getContainer().classList.add('measuring');
   measBox('Mesure : touche le <b>1er point</b>');
 });
 // Points de mesure déplaçables (comme les portes) : la mesure se met à jour pendant le glissement
 const measIcon = L.divIcon({ className: 'measpt', iconSize: [34, 34], iconAnchor: [17, 17], html: '<span></span>' });
 function measMarker(key) {
   const m = L.marker(LL(meas[key]), { draggable: false, icon: measIcon, zIndexOffset: 900 }).addTo(measLayer);
-  longPressDrag(m, ll => { meas[key] = ll; updateMeasure(); }, () => {});
+  longPressDrag(m, ll => { meas[key] = ll; updateMeasure(); }, () => { const q = snapMeasure(meas[key]); if (q !== meas[key]) { meas[key] = q; m.setLatLng([q.lat, q.lng]); updateMeasure(); } });
   return m;
 }
 function updateMeasure() {
@@ -1069,7 +1070,21 @@ function updateMeasure() {
   }
   measBox(`<b>Cap ${hdg(c)} · ${fmtDist(d)}</b><br><small>Appui long sur un point puis glisse pour ajuster · 📏 = effacer</small>`);
 }
+// Pendant la mesure (21 nov. 2026, demande d'Henri) : les autres points ne réagissent plus au doigt (classe « measuring »
+// sur la carte, voir style.css), et un point de mesure posé à moins de 22 px d'un point existant se cale exactement dessus.
+function snapMeasure(p) {
+  const P = map.latLngToContainerPoint([p.lat, p.lng]); let best = p, bd = 22;
+  map.eachLayer(l => {
+    if (measLayer.hasLayer(l) || !l.getLatLng || (L.Circle && l instanceof L.Circle)) return;
+    if (l instanceof L.Marker) { const sz = l.options.icon && l.options.icon.options && l.options.icon.options.iconSize; if (!sz || !(+sz[0] > 0)) return; } // étiquettes : pas de cible
+    else if (!(l instanceof L.CircleMarker)) return;
+    const ll = l.getLatLng(), d = P.distanceTo(map.latLngToContainerPoint(ll));
+    if (d < bd) { bd = d; best = { lat: ll.lat, lng: ll.lng }; }
+  });
+  return best;
+}
 function measureClick(p) {
+  p = snapMeasure(p);
   if (!meas.a) { meas.a = p; meas.ma = measMarker('a'); measBox('Mesure : touche le <b>2e point</b>'); return; }
   if (!meas.b) { meas.b = p; meas.mb = measMarker('b'); updateMeasure(); }
   // une fois les deux points posés, on les déplace au doigt ; un appui sur la carte ne fait rien

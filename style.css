@@ -187,3 +187,6 @@ button,input,select,label,a{touch-action:manipulation}
 
 /* Deux boutons côte à côte : même hauteur, même si l'un a son texte sur deux lignes (ex. Fermer / Partager-Enregistrer) */
 .grid2>button{align-self:stretch}
+
+/* Outil de mesure actif : les autres points et traits ne captent plus le doigt (on mesure jusque sur eux) */
+.leaflet-container.measuring .leaflet-interactive:not(.measpt){pointer-events:none!important}
