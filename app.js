@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.11.2';
+const VERSION = '0.12.0';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -452,7 +452,7 @@ function relaxPolygon(sol) {
 }
 
 // ---------- Carte ----------
-const map = L.map('map', { zoomControl: false, maxZoom: 22, zoomSnap: 0.25, attributionControl: true,
+const map = L.map('map', { zoomControl: false, maxZoom: 22, zoomSnap: 0.05, attributionControl: true,
   rotate: true, touchRotate: true, bearing: current.bearing || 0, rotateControl: false, touchPitch: false, pitchDrag: false, shiftKeyRotate: true })
   .setView([current.center.lat, current.center.lng], current.zoom);
 let basemap = (store.get('vl.basemap', 'esri') in BASEMAPS) ? store.get('vl.basemap', 'esri') : 'esri';
@@ -728,9 +728,10 @@ function figurePoints() {
   return pts;
 }
 function freeRect() {
-  const W = map.getSize().x, H = map.getSize().y, m = 14;
+  // marges serrées (20 nov. 2026) : la figure remplit l'écran, ses bords peuvent frôler les boutons
+  const W = map.getSize().x, H = map.getSize().y, m = 4;
   const top = $('top').getBoundingClientRect(), quick = $('quick').getBoundingClientRect();
-  return { l: Math.max(m, quick.right + m), t: Math.max(m, top.bottom + m), r: W - 64, b: H - 40 };
+  return { l: Math.max(m, quick.right + m), t: Math.max(m, top.bottom + m), r: W - 6, b: H - 22 };
 }
 function fitFigure() {
   const pts = figurePoints(); if (pts.length < 2) return;
@@ -741,7 +742,7 @@ function fitFigure() {
     const y0 = Math.min(...P.map(p => p.y)), y1 = Math.max(...P.map(p => p.y));
     const R = freeRect(), aw = Math.max(80, R.r - R.l), ah = Math.max(80, R.b - R.t);
     const k = Math.min(aw / Math.max(x1 - x0, 1), ah / Math.max(y1 - y0, 1));
-    const z = Math.min(19, Math.floor((map.getZoom() + Math.log2(k)) * 4) / 4);
+    const z = Math.min(19, Math.floor((map.getZoom() + Math.log2(k)) * 20) / 20); // zoom au 1/20 près (plus d'arrondi au 1/4 qui perdait jusqu'à 16 %)
     const centerLL = map.containerPointToLatLng([(x0 + x1) / 2, (y0 + y1) / 2]);
     map.setView(centerLL, z, { animate: false });
     // décale pour que le centre de la figure tombe au centre de la zone libre
