@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.14.1';
+const VERSION = '0.14.2';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -1080,7 +1080,13 @@ map.on('zoomend', redraw);
   TG.disable(); TG.enable(); // ré-abonne les écouteurs aux versions modifiées
 })();
 // Rotation du téléphone : Leaflet doit relire la taille de l'écran
-['resize', 'orientationchange'].forEach(ev => window.addEventListener(ev, () => setTimeout(() => map.invalidateSize({ animate: false }), 250)));
+// Rotation portrait ↔ paysage : recadrage automatique (20 nov. 2026 : en paysage, Henri gardait le cadrage du portrait)
+let lastLand = innerWidth > innerHeight;
+['resize', 'orientationchange'].forEach(ev => window.addEventListener(ev, () => setTimeout(() => {
+  map.invalidateSize({ animate: false });
+  const land = innerWidth > innerHeight;
+  if (land !== lastLand) { lastLand = land; if (figurePoints().length >= 2) fitFigure(); }
+}, 400)));
 
 let sheetSize = 'full';
 function setSheetSize(sz) { sheetSize = sz; $('sheet').classList.toggle('mini', sz === 'mini'); $('sheet').classList.toggle('full', sz === 'full'); }
