@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.16.1';
+const VERSION = '0.16.2';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -728,21 +728,25 @@ function figurePoints() {
   return pts;
 }
 function freeRect() {
-  // marges serrées (20 nov. 2026) : la figure remplit l'écran, ses bords peuvent frôler les boutons
-  const W = map.getSize().x, H = map.getSize().y, m = 4;
-  const quick = $('quick').getBoundingClientRect(), l = Math.max(m, quick.right + m), r = W - 6;
+  // marges serrées (20 nov. 2026) : la figure remplit l'écran, ses bords peuvent frôler les boutons.
+  // Tout en coordonnées de la carte (les rectangles des boutons sont ramenés à l'origine de la carte : sur iPhone,
+  // la page peut être décalée et la carte ne commence pas forcément au bord de l'écran)
+  const W = map.getSize().x, H = map.getSize().y, m = 4, c = map.getContainer().getBoundingClientRect();
+  const rel = el => { const q = el.getBoundingClientRect(); return { left: q.left - c.left, right: q.right - c.left, top: q.top - c.top, bottom: q.bottom - c.top, width: q.width }; };
+  const quick = rel($('quick')), l = Math.max(m, quick.right + m), r = W - 6;
   // haut : seuls les boutons du haut situés au-dessus de la zone libre comptent (en paysage, Manœuvre/Zones sont
   // au-dessus de la colonne de gauche : la figure peut monter jusqu'au bas des boutons ronds N/AXE/⤢/⌖)
   let t = m;
-  document.querySelectorAll('#top button').forEach(el => { const q = el.getBoundingClientRect(); if (q.width && q.right > l && q.left < r) t = Math.max(t, q.bottom + m); });
-  return { l, t, r, b: H - 22 };
+  const tops = [...document.querySelectorAll('#top button')].map(rel).filter(q => q.width);
+  tops.forEach(q => { if (q.right > l && q.left < r) t = Math.max(t, q.bottom + m); });
+  return { l, t, r, b: H - 22, tops };
 }
 // Zones libres candidates : A = sous les boutons du haut, toute la largeur ; B = tout en haut, mais à gauche des
 // boutons ronds (en paysage, la figure peut monter jusqu'en haut de l'écran à gauche de N/AXE/⤢/⌖ — photo d'Henri du 20 nov.).
 // Le cadrage garde celle qui donne la plus grande figure.
 function freeRects() {
   const A = freeRect(), m = 4;
-  let rb = Infinity; document.querySelectorAll('#top button').forEach(el => { const q = el.getBoundingClientRect(); if (q.width && q.left > A.l && q.top < A.t) rb = Math.min(rb, q.left - m); });
+  let rb = Infinity; A.tops.forEach(q => { if (q.left > A.l && q.top < A.t) rb = Math.min(rb, q.left - m); });
   const B = { l: A.l, t: m, r: Math.min(A.r, rb), b: A.b };
   return B.r - B.l >= 120 && B.t < A.t ? [A, B] : [A];
 }
@@ -765,10 +769,25 @@ function fitFigure() {
   const c0 = map.getCenter(), z0 = map.getZoom(); let best = null;
   freeRects().forEach(R => {
     map.setView(c0, z0, { animate: false }); fitInto(pts, R);
-    if (!best || map.getZoom() > best.z + 0.01) best = { c: map.getCenter(), z: map.getZoom() };
+    if (!best || map.getZoom() > best.z + 0.01) best = { c: map.getCenter(), z: map.getZoom(), R };
   });
   map.setView(best.c, best.z, { animate: false });
+  fitCheck(pts, best.R);
   redraw();
+}
+// Contrôle après cadrage : boîte réelle (points + étiquettes mesurées à l'écran) dans la zone choisie ; sinon on décale,
+// et si elle est trop grande on dézoome d'un cran (photo d'Henri du 20 nov. : figure passée sous la colonne de boutons)
+function fitCheck(pts, R) {
+  for (let k = 0; k < 6; k++) {
+    draw();
+    const P = pts.map(p => map.latLngToContainerPoint(LL(p)));
+    let x0 = Math.min(...P.map(p => p.x)), x1 = Math.max(...P.map(p => p.x)), y0 = Math.min(...P.map(p => p.y)), y1 = Math.max(...P.map(p => p.y));
+    const o = labelOverhang(x0, x1, y0, y1); x0 -= o.l; x1 += o.r; y0 -= o.t; y1 += o.b;
+    if (x1 - x0 > R.r - R.l + 1 || y1 - y0 > R.b - R.t + 1) { map.setZoom(map.getZoom() - 0.05, { animate: false }); continue; }
+    const dx = x0 < R.l ? R.l - x0 : x1 > R.r ? R.r - x1 : 0, dy = y0 < R.t ? R.t - y0 : y1 > R.b ? R.b - y1 : 0;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+    map.panBy([-dx, -dy], { animate: false });
+  }
 }
 function fitInto(pts, R) {
   for (let pass = 0; pass < 3; pass++) { // 3 passes : les étiquettes sont remesurées après chaque zoom
