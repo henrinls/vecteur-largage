@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.12.0';
+const VERSION = '0.13.0';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -733,22 +733,38 @@ function freeRect() {
   const top = $('top').getBoundingClientRect(), quick = $('quick').getBoundingClientRect();
   return { l: Math.max(m, quick.right + m), t: Math.max(m, top.bottom + m), r: W - 6, b: H - 22 };
 }
+// Étiquettes (degrés, chiffres, hauteurs…) : leur débord en pixels au-delà de la figure est réservé en plus,
+// sinon le cadrage serré les cache sous les boutons (« 180° » devenu « 80° », 20 nov. 2026)
+const FIT_LABELS = '.glabel span, .vlabel';
+function labelOverhang(x0, x1, y0, y1) {
+  const o = { l: 0, r: 0, t: 0, b: 0 }; if (!FIT_LABELS) return o;
+  const c = map.getContainer().getBoundingClientRect();
+  document.querySelectorAll(FIT_LABELS).forEach(el => {
+    const r = el.getBoundingClientRect(); if (!r.width || !r.height) return;
+    const lx0 = r.left - c.left, lx1 = r.right - c.left, ly0 = r.top - c.top, ly1 = r.bottom - c.top;
+    o.l = Math.max(o.l, x0 - lx0); o.r = Math.max(o.r, lx1 - x1); o.t = Math.max(o.t, y0 - ly0); o.b = Math.max(o.b, ly1 - y1);
+  });
+  return o;
+}
 function fitFigure() {
   const pts = figurePoints(); if (pts.length < 2) return;
   map.invalidateSize({ animate: false }); // taille réelle de l'écran (portrait / paysage)
-  for (let pass = 0; pass < 2; pass++) { // 2 passes : la 2e corrige les arrondis du zoom
+  for (let pass = 0; pass < 3; pass++) { // 3 passes : les étiquettes sont remesurées après chaque zoom
+    draw(); // étiquettes à jour pour ce zoom
     const P = pts.map(p => map.latLngToContainerPoint(LL(p)));
     const x0 = Math.min(...P.map(p => p.x)), x1 = Math.max(...P.map(p => p.x));
     const y0 = Math.min(...P.map(p => p.y)), y1 = Math.max(...P.map(p => p.y));
-    const R = freeRect(), aw = Math.max(80, R.r - R.l), ah = Math.max(80, R.b - R.t);
+    const o = labelOverhang(x0, x1, y0, y1);
+    const R = freeRect(), aw = Math.max(80, R.r - R.l - o.l - o.r), ah = Math.max(80, R.b - R.t - o.t - o.b);
     const k = Math.min(aw / Math.max(x1 - x0, 1), ah / Math.max(y1 - y0, 1));
-    const z = Math.min(19, Math.floor((map.getZoom() + Math.log2(k)) * 20) / 20); // zoom au 1/20 près (plus d'arrondi au 1/4 qui perdait jusqu'à 16 %)
+    const z = Math.min(19, Math.floor((map.getZoom() + Math.log2(k)) * 20) / 20); // zoom au 1/20 près
     const centerLL = map.containerPointToLatLng([(x0 + x1) / 2, (y0 + y1) / 2]);
     map.setView(centerLL, z, { animate: false });
-    // décale pour que le centre de la figure tombe au centre de la zone libre
-    const S = map.getSize(), cx = S.x / 2, cy = S.y / 2, ax = (R.l + R.r) / 2, ay = (R.t + R.b) / 2;
+    // centre de la figure au centre de la zone libre, décalé du débord des étiquettes
+    const S = map.getSize(), cx = S.x / 2, cy = S.y / 2, ax = (R.l + R.r + o.l - o.r) / 2, ay = (R.t + R.b + o.t - o.b) / 2;
     map.panBy([cx - ax, cy - ay], { animate: false });
   }
+  redraw();
 }
 
 function updateInfo() {
@@ -1595,7 +1611,14 @@ $('importFile').addEventListener('change', async e => {
     const d = JSON.parse(await f.text());
     if (!Array.isArray(d.zones)) throw new Error('format');
     const wasEmpty = zones.length === 0;
-    if (wasEmpty && d.profile) { PROFILE_KEYS.forEach(k => { if (d.profile[k] !== undefined) profile[k] = d.profile[k]; }); store.set('vl.profile', profile); }
+    // Le fichier contient zones + paramètres : les paramètres sont repris aussi (20 nov. 2026) ; question seulement si elle diffère de la tienne et que tu as déjà des zones
+    let tookProfile = false;
+    if (d.profile && typeof d.profile === 'object') {
+      const diff = PROFILE_KEYS.some(k => d.profile[k] !== undefined && JSON.stringify(d.profile[k]) !== JSON.stringify(profile[k]));
+      if (diff && (wasEmpty || await ask('Le fichier contient aussi des paramètres différents des tiens. Les reprendre ? (ils remplacent tes réglages actuels ; Annuler = garder les tiens, les zones sont importées quand même)'))) {
+        PROFILE_KEYS.forEach(k => { if (d.profile[k] !== undefined) profile[k] = d.profile[k]; }); store.set('vl.profile', profile); tookProfile = true;
+      }
+    }
     let added = 0, updated = 0;
     d.zones.map(upgrade).forEach(z => {
       if (!z.id) z.id = 'z' + Date.now() + Math.random().toString(36).slice(2, 6);
@@ -1605,9 +1628,9 @@ $('importFile').addEventListener('change', async e => {
       else if ((z.updated || 0) > (zones[i].updated || 0)) { zones[i] = z; updated++; }
     });
     store.set('vl.zones', zones);
-    if (wasEmpty) { applyProfile(current); fillInputs(); }
+    if (tookProfile) { zones.forEach(applyProfile); store.set('vl.zones', zones); applyProfile(current); persist(); fillInputs(); }
     renderZones(); redraw();
-    toast(`Import : ${added} zone(s) ajoutée(s)${updated ? `, ${updated} mise(s) à jour` : ''}`);
+    toast(`Import : ${added} zone(s) ajoutée(s)${updated ? `, ${updated} mise(s) à jour` : ''}${tookProfile ? ' · paramètres repris' : ''}`);
   } catch (er) { toast('Fichier illisible'); }
 });
 // Tout effacer (zones, paramètres, zone en cours, prévisions) — les photos gardées hors-ligne restent.
