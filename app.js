@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.16.0';
+const VERSION = '0.16.1';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -735,9 +735,16 @@ function freeRect() {
   // au-dessus de la colonne de gauche : la figure peut monter jusqu'au bas des boutons ronds N/AXE/⤢/⌖)
   let t = m;
   document.querySelectorAll('#top button').forEach(el => { const q = el.getBoundingClientRect(); if (q.width && q.right > l && q.left < r) t = Math.max(t, q.bottom + m); });
-  let b = H - 22; // bas : au-dessus du curseur de transparence s'il est sous la zone libre
-  const fb = $('fadeBox') && $('fadeBox').getBoundingClientRect(); if (fb && fb.width && Math.min(fb.right, r) - Math.max(fb.left, l) > 10) b = Math.min(b, fb.top - m);
-  return { l, t, r, b };
+  return { l, t, r, b: H - 22 };
+}
+// Zones libres candidates : A = sous les boutons du haut, toute la largeur ; B = tout en haut, mais à gauche des
+// boutons ronds (en paysage, la figure peut monter jusqu'en haut de l'écran à gauche de N/AXE/⤢/⌖ — photo d'Henri du 20 nov.).
+// Le cadrage garde celle qui donne la plus grande figure.
+function freeRects() {
+  const A = freeRect(), m = 4;
+  let rb = Infinity; document.querySelectorAll('#top button').forEach(el => { const q = el.getBoundingClientRect(); if (q.width && q.left > A.l && q.top < A.t) rb = Math.min(rb, q.left - m); });
+  const B = { l: A.l, t: m, r: Math.min(A.r, rb), b: A.b };
+  return B.r - B.l >= 120 && B.t < A.t ? [A, B] : [A];
 }
 // Étiquettes (degrés, chiffres, hauteurs…) : leur débord en pixels au-delà de la figure est réservé en plus,
 // sinon le cadrage serré les cache sous les boutons (« 180° » devenu « 80° », 20 nov. 2026)
@@ -755,13 +762,22 @@ function labelOverhang(x0, x1, y0, y1) {
 function fitFigure() {
   const pts = figurePoints(); if (pts.length < 2) return;
   map.invalidateSize({ animate: false }); // taille réelle de l'écran (portrait / paysage)
+  const c0 = map.getCenter(), z0 = map.getZoom(); let best = null;
+  freeRects().forEach(R => {
+    map.setView(c0, z0, { animate: false }); fitInto(pts, R);
+    if (!best || map.getZoom() > best.z + 0.01) best = { c: map.getCenter(), z: map.getZoom() };
+  });
+  map.setView(best.c, best.z, { animate: false });
+  redraw();
+}
+function fitInto(pts, R) {
   for (let pass = 0; pass < 3; pass++) { // 3 passes : les étiquettes sont remesurées après chaque zoom
     draw(); // étiquettes à jour pour ce zoom
     const P = pts.map(p => map.latLngToContainerPoint(LL(p)));
     const x0 = Math.min(...P.map(p => p.x)), x1 = Math.max(...P.map(p => p.x));
     const y0 = Math.min(...P.map(p => p.y)), y1 = Math.max(...P.map(p => p.y));
     const o = labelOverhang(x0, x1, y0, y1);
-    const R = freeRect(), aw = Math.max(80, R.r - R.l - o.l - o.r), ah = Math.max(80, R.b - R.t - o.t - o.b);
+    const aw = Math.max(80, R.r - R.l - o.l - o.r), ah = Math.max(80, R.b - R.t - o.t - o.b);
     const k = Math.min(aw / Math.max(x1 - x0, 1), ah / Math.max(y1 - y0, 1));
     const z = Math.min(19, Math.floor((map.getZoom() + Math.log2(k)) * 20) / 20); // zoom au 1/20 près
     const centerLL = map.containerPointToLatLng([(x0 + x1) / 2, (y0 + y1) / 2]);
@@ -770,7 +786,6 @@ function fitFigure() {
     const S = map.getSize(), cx = S.x / 2, cy = S.y / 2, ax = (R.l + R.r + o.l - o.r) / 2, ay = (R.t + R.b + o.t - o.b) / 2;
     map.panBy([cx - ax, cy - ay], { animate: false });
   }
-  redraw();
 }
 
 function updateInfo() {
@@ -1083,48 +1098,21 @@ map.on('zoomend', redraw);
   TG.disable(); TG.enable(); // ré-abonne les écouteurs aux versions modifiées
 })();
 // Rotation du téléphone : Leaflet doit relire la taille de l'écran
-// ---------- Transparence du fond de carte (20 nov. 2026, commun aux 3 applis) ----------
-// Curseur horizontal (à gauche du zoom) : 100 = carte nette, 0 = fond uni ; ☀ : le fond uni est noir ou blanc. Même rendu dans le PDF.
-const fade = Object.assign({ v: 100, bg: 'black' }, store.get('vl.fade', {}));
-function applyFade() {
-  const op = Math.max(0, Math.min(100, +fade.v || 0)) / 100, col = fade.bg === 'white' ? '#fff' : '#000';
-  ['tilePane', 'photoPane'].forEach(n => { const p = map.getPane(n); if (p) p.style.opacity = op; });
-  map.getContainer().style.background = op < 1 ? col : '';
-  $('fadeBg').className = fade.bg; $('fadeRange').value = fade.v; placeFade();
-}
-function placeFade() {
-  // portrait : en bas, juste à gauche des boutons + / − du zoom, aligné sur leur bas ;
-  // paysage : sous la colonne de boutons de gauche (la hauteur est rare en paysage, le curseur ne doit pas couper la figure)
-  const z = document.querySelector('.leaflet-control-zoom'), b = $('fadeBox'); if (!z || !b) return;
-  if (innerWidth > innerHeight) {
-    const q = $('quick').getBoundingClientRect(), sc = document.querySelector('.leaflet-control-scale');
-    const bot = sc ? sc.getBoundingClientRect().top - 6 : innerHeight - 30;
-    b.style.left = `${Math.round(q.left)}px`; b.style.top = `${Math.round(bot - b.offsetHeight)}px`; return;
-  }
-  const r = z.getBoundingClientRect(); if (!r.width) return;
-  b.style.left = `${Math.round(r.left - 8 - b.offsetWidth)}px`; b.style.top = `${Math.round(r.bottom - b.offsetHeight)}px`;
-}
-window.addEventListener('resize', () => setTimeout(placeFade, 450));
-$('fadeRange').addEventListener('input', e => { fade.v = +e.target.value; applyFade(); store.set('vl.fade', fade); });
-$('fadeBg').addEventListener('click', () => {
-  fade.bg = fade.bg === 'white' ? 'black' : 'white'; if (fade.v >= 100) fade.v = 60; // un appui sur ☀ éclaircit ou fonce tout de suite
-  applyFade(); store.set('vl.fade', fade); toast(fade.bg === 'white' ? 'Fond vers le blanc' : 'Fond vers le noir');
-});
-function pdfFade(g, W, H) { // même voile que l'écran sur le fond du PDF
-  const op = Math.max(0, Math.min(100, +fade.v || 0)) / 100; if (op >= 1) return;
-  g.save(); g.globalAlpha = 1 - op; g.fillStyle = fade.bg === 'white' ? '#fff' : '#000'; g.fillRect(0, 0, W, H); g.restore();
-}
-applyFade();
-
 setTimeout(() => { if (!current.id && (current.prvs && current.prvs.length)) askZoneName('Ta zone en cours n\'est pas enregistrée. Donne-lui un nom pour la garder (elle s\'enregistre ensuite toute seule) :'); }, 1500);
 
-// Rotation portrait ↔ paysage : recadrage automatique (20 nov. 2026 : en paysage, Henri gardait le cadrage du portrait)
-let lastLand = innerWidth > innerHeight;
-['resize', 'orientationchange'].forEach(ev => window.addEventListener(ev, () => setTimeout(() => {
-  map.invalidateSize({ animate: false });
-  const land = innerWidth > innerHeight;
-  if (land !== lastLand) { lastLand = land; if (figurePoints().length >= 2) fitFigure(); }
-}, 400)));
+// Rotation portrait ↔ paysage : recadrage automatique, une fois la rotation finie (iOS envoie plusieurs « resize »
+// pendant l'animation : un recadrage trop tôt utilisait une taille d'écran intermédiaire → figure minuscule en paysage)
+let lastLand = innerWidth > innerHeight, fitT = 0, fitPending = false;
+function onResize() {
+  clearTimeout(fitT);
+  const land = innerWidth > innerHeight; if (land !== lastLand) { lastLand = land; fitPending = true; }
+  fitT = setTimeout(() => {
+    map.invalidateSize({ animate: false });
+    if (fitPending) { fitPending = false; if (figurePoints().length >= 2) { fitFigure(); setTimeout(() => { map.invalidateSize({ animate: false }); fitFigure(); }, 700); } }
+  }, 500);
+}
+['resize', 'orientationchange'].forEach(ev => window.addEventListener(ev, onResize));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', onResize);
 
 let sheetSize = 'full';
 function setSheetSize(sz) { sheetSize = sz; $('sheet').classList.toggle('mini', sz === 'mini'); $('sheet').classList.toggle('full', sz === 'full'); }
@@ -1508,7 +1496,6 @@ async function renderPdfCanvas() {
   await Promise.all(Array.from({ length: 6 }, run));
   g.restore();
   if ((typeof Photo !== 'undefined')) { try { await Photo.drawPdf(g, toC); } catch (e) {} }
-  pdfFade(g, W, H); // transparence du fond, comme à l'écran
 
   // ---- Tracé ----
   const u = W / 1000;

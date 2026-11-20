@@ -1,5 +1,5 @@
 // Service worker : appli disponible hors-ligne + images satellite en cache.
-const APP_CACHE = 'vl-app-v0.16.0';
+const APP_CACHE = 'vl-app-v0.16.1';
 const TILE_CACHE = 'vl-tiles-v1';
 const APP_FILES = ['./', 'index.html', 'style.css', 'geo.js', 'clubs.js', 'wmm.js', 'app.js', 'photo.js', 'manifest.webmanifest',
   'icon-192.png', 'icon-512.png', 'vendor/leaflet.js', 'vendor/leaflet-rotate.js', 'vendor/leaflet.css', 'vendor/jspdf.umd.min.js',
