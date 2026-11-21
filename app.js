@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.20.1';
+const VERSION = '0.21.0';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -511,12 +511,19 @@ function compute() {
   if (key !== solKey) { sol = solve(current, prof, wxRec); solKey = key; }
   if (sol.ok) current.vector = { when: current.when, start: sol.start, end: sol.end, heading: sol.heading, length: Math.round(sol.length), decl: sol.decl, prv: sol.prv.id };
 }
+/* Cartouche « Cap avion » sous les boutons ronds (21 nov. 2026, repris de trace-isv à la demande d'Henri) ;
+   un appui ouvre le réglage du cap de largage à la main */
+function capInfo() {
+  const el = $('capInfo'); if (!el) return;
+  if (!sol || !sol.ok) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+  el.innerHTML = `<div>Cap avion : ${hdg(sol.heading)} / ${fmtInt(sol.length)} m</div>`; el.classList.remove('hidden');
+}
 function draw(light) {
   if (typeof Photo !== 'undefined') Photo.sync();
   fig.clearLayers(); grads.clearLayers();
   compute();
   if (current.show.nm && current.dz) nmRings();
-  updateInfo(); syncQuick(); syncPlaceBtn(); syncJump(); fillInputs(true);
+  updateInfo(); syncQuick(); syncPlaceBtn(); syncJump(); fillInputs(true); capInfo();
   if (placing) placeBanner();
   else if (!current.prvs.length) setBanner(current.id ? 'Place les points de rendez-vous : ☰ Zones → PRV → Toucher la carte.' : 'Pour commencer : ☰ → ＋ Nouvelle zone.');
   else if (!sol.ok) setBanner(sol.err);
@@ -741,7 +748,7 @@ function freeRect() {
   // haut : seuls les boutons du haut situés au-dessus de la zone libre comptent (en paysage, Manœuvre/Zones sont
   // au-dessus de la colonne de gauche : la figure peut monter jusqu'au bas des boutons ronds N/AXE/⤢/⌖)
   let t = m;
-  const tops = [...document.querySelectorAll('#top button')].map(rel).filter(q => q.width);
+  const tops = [...document.querySelectorAll('#top button, #capInfo')].map(rel).filter(q => q.width);
   tops.forEach(q => { if (q.right > l && q.left < r) t = Math.max(t, q.bottom + m); });
   return { l, t, r, b: H - 22, tops };
 }
@@ -1807,3 +1814,4 @@ $('qZero').addEventListener('click', () => { zeroWind = !zeroWind; store.set('vl
     });
   }, { capture: true, passive: false });
 })();
+$('capInfo').addEventListener('click', () => editHeading());

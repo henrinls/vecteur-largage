@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>vecteur-largage</title>
 <link rel="stylesheet" href="vendor/leaflet.css">
-<link rel="stylesheet" href="style.css?v=0.20.1">
+<link rel="stylesheet" href="style.css?v=0.21.0">
 </head>
 <body>
 <div id="map"></div>
@@ -23,10 +23,15 @@
     <button id="btnZones" class="pill" title="Zones">☰ <span id="zoneName">Nouvelle zone</span></button>
   </div>
   <div class="spacer"></div>
-  <button id="btnNorth" class="round" title="Nord en haut"><span id="compassNeedle">▲<small>N</small></span></button>
-  <button id="btnAxisUp" class="round" title="Axe de largage vers le haut"><span class="axisIco">↑<small>AXE</small></span></button>
-  <button id="btnFit" class="round" title="Zoom optimisé">⤢</button>
-  <button id="btnLocate" class="round" title="Ma position">⌖</button>
+  <div class="rightcol">
+    <div class="rbtns">
+      <button id="btnNorth" class="round" title="Nord en haut"><span id="compassNeedle">▲<small>N</small></span></button>
+      <button id="btnAxisUp" class="round" title="Axe de largage vers le haut"><span class="axisIco">↑<small>AXE</small></span></button>
+      <button id="btnFit" class="round" title="Zoom optimisé">⤢</button>
+      <button id="btnLocate" class="round" title="Ma position">⌖</button>
+    </div>
+    <div id="capInfo" class="hidden" title="Changer le cap de largage"></div>
+  </div>
 </header>
 
 <div id="banner" class="hidden"></div>
@@ -234,14 +239,14 @@
 
 <div id="toast" class="hidden"></div>
 
-<script src="vendor/leaflet.js?v=0.20.1"></script>
-<script src="vendor/leaflet-rotate.js?v=0.20.1"></script>
-<script src="geo.js?v=0.20.1"></script>
-<script src="clubs.js?v=0.20.1"></script>
-<script src="wmm.js?v=0.20.1"></script>
-<script src="windpick.js?v=0.20.1"></script>
-<script src="pdfview.js?v=0.20.1"></script>
-<script src="app.js?v=0.20.1"></script>
-<script src="photo.js?v=0.20.1"></script>
+<script src="vendor/leaflet.js?v=0.21.0"></script>
+<script src="vendor/leaflet-rotate.js?v=0.21.0"></script>
+<script src="geo.js?v=0.21.0"></script>
+<script src="clubs.js?v=0.21.0"></script>
+<script src="wmm.js?v=0.21.0"></script>
+<script src="windpick.js?v=0.21.0"></script>
+<script src="pdfview.js?v=0.21.0"></script>
+<script src="app.js?v=0.21.0"></script>
+<script src="photo.js?v=0.21.0"></script>
 </body>
 </html>
