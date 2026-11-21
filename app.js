@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.16.6';
+const VERSION = '0.16.7';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -65,7 +65,7 @@ async function wxFetch(z, date) {
     try { r = await fetch(wxUrl(c.lat, c.lng, date, s2, minimal)); if (r.ok) { js = await r.json(); used = s2; break; } } catch (e) { r = null; if (navigator.onLine === false) break; }
   }
   if (!js || !js.hourly) throw new Error(r ? 'HTTP ' + r.status : 'réseau');
-  const rec = { date, fetched: Date.now(), model: used.name, elev: js.elevation, hourly: js.hourly };
+  const rec = { date, fetched: Date.now(), model: used.name, elev: js.elevation, hourly: js.hourly, rh: Object.keys(js.hourly).some(k => /^relative_humidity/.test(k)) };
   const k = wxKey(z.id, date); wxMem[k] = rec; store.set(k, rec);
   // ménage : on ne garde que les 4 derniers jours téléchargés de chaque zone
   try { const keepDay = z.vector && z.vector.when ? wxKey(z.id, z.vector.when.slice(0, 10)) : null; Object.keys(localStorage).filter(x => x.startsWith(`vl.wx.${z.id || 'tmp'}.`) && x !== keepDay).sort().slice(0, -4).forEach(x => store.del(x)); } catch (e) {}
@@ -954,7 +954,7 @@ let wxBusy = false;
 async function ensureWx(force, date) {
   date = date || current.when.slice(0, 10);
   const have = wxCached(current.id, date);
-  if (have && !force && (current.holdWx || Date.now() - have.fetched < 3600e3)) return have; // vecteur gardé : prévision figée
+  if (have && !force && (current.holdWx || (Date.now() - have.fetched < 3600e3 && have.rh !== undefined))) return have; /* prévision d'avant l'humidité (rh absent) : retéléchargée */ // vecteur gardé : prévision figée
   if (wxBusy) return have; wxBusy = true; $('wxInfo').innerHTML = 'Téléchargement de la prévision…';
   try { const r = await wxFetch(current, date); delete wxFailed[date]; persist(); return r; }
   catch (e) { wxFailed[date] = true; toast(have ? 'Pas de réseau : prévision gardée, téléchargée le ' + fmtFetched(have.fetched) : 'Prévision impossible à télécharger (réseau ?)'); return have; }
@@ -990,7 +990,7 @@ function windRows(pr, elev) { // une ligne par tranche de 1 000 ft (FL), de la s
   for (let fl = Math.max(10, fl0); fl <= 400; fl += 10) { const h = flToAgl(fl, pr, elev); if (h > 10000) break; if (h > 20) add('FL' + String(fl).padStart(3, '0'), h); }
   return rows;
 }
-async function setTWhen(w) { tWhen = w; renderWinds(); const d = w.slice(0, 10); if (!wxCached(current.id, d) || Date.now() - wxCached(current.id, d).fetched > 3600e3) { await ensureWx(false, d); renderWinds(); } }
+async function setTWhen(w) { tWhen = w; renderWinds(); const d = w.slice(0, 10); if (!wxCached(current.id, d) || Date.now() - wxCached(current.id, d).fetched > 3600e3 || wxCached(current.id, d).rh === undefined) { await ensureWx(false, d); renderWinds(); } }
 $('qWinds').addEventListener('click', () => { const b = $('windsBox'); if (!b.classList.contains('hidden')) { b.classList.add('hidden'); syncQuick(); return; } b.classList.remove('hidden'); syncQuick(); setTWhen(current.when); });
 $('t_close').addEventListener('click', () => { $('windsBox').classList.add('hidden'); syncQuick(); });
 $('t_minus').addEventListener('click', () => setTWhen(shiftWhen(tWhen, -1)));
