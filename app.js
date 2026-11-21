@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.20.0';
+const VERSION = '0.20.1';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -1790,4 +1790,20 @@ $('qZero').addEventListener('click', () => { zeroWind = !zeroWind; store.set('vl
   const s = document.getElementById('sheet'), t = s && s.querySelector('.tabs'); if (!t) return;
   const f = () => { if (t.offsetHeight) s.style.setProperty('--h3top', ((parseFloat(getComputedStyle(t).top) || 0) + t.offsetHeight) + 'px'); };
   if (window.ResizeObserver) new ResizeObserver(f).observe(t); window.addEventListener('resize', f); f();
+})();
+
+/* Zoom au pincement du trackpad (Mac) : le navigateur l'envoie en « wheel » avec ctrlKey, et Leaflet le divise
+   tellement (deltaY / 6 sur Mac) que le zoom est très lent. On le traite ici, plus réactif (21 nov. 2026, commun aux applis carte).
+   Sans effet sur iPhone (pincement tactile) ni sur la molette de la souris. */
+(function () {
+  const el = map.getContainer(); let acc = 0, pt = null, raf = 0;
+  el.addEventListener('wheel', e => {
+    if (!e.ctrlKey) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    acc += -e.deltaY * (e.deltaMode === 1 ? 0.25 : 0.012); pt = map.mouseEventToContainerPoint(e);
+    if (!raf) raf = requestAnimationFrame(() => {
+      raf = 0; const z = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), map.getZoom() + acc)); acc = 0;
+      if (Math.abs(z - map.getZoom()) > 1e-3) map.setZoomAround(pt, z, { animate: false });
+    });
+  }, { capture: true, passive: false });
 })();
