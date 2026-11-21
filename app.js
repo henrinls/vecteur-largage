@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.22.3';
+const VERSION = '0.23.0';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -1075,14 +1075,16 @@ function capDeg(a, b) { // cap initial (orthodromie) de a vers b, en degrés
 }
 function fmtDist(m) { return m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(2).replace('.', ',')} km`; }
 function measBox(t) { const b = $('measureBox'); if (!t) b.classList.add('hidden'); else { b.innerHTML = t; b.classList.remove('hidden'); } }
+var measSusp = null; /* placement mis de côté pendant la mesure 📏 */
 function stopMeasure() {
   Object.assign(meas, { active: false, a: null, b: null, ma: null, mb: null, line: null, halo: null, lbl: null });
   map.getContainer().classList.remove('measuring');
   measLayer.clearLayers(); measBox(null); $('qMeasure').classList.remove('on');
+  if (measSusp) { placing = measSusp; measSusp = null; placeBanner(); syncPlaceBtn(); redraw(); toast('Retour au placement en cours'); }
 }
 $('qMeasure').addEventListener('click', () => {
   if (meas.active) { stopMeasure(); return; }
-  if (placing) return toast('Termine d\'abord le placement en cours');
+  if (placing) { measSusp = placing; placing = null; placeBanner(); syncPlaceBtn(); redraw(); } /* 22 nov. 2026 (Henri) : mesure possible pendant un placement, il reprend en quittant la mesure */
   meas.active = true; $('qMeasure').classList.add('on'); map.getContainer().classList.add('measuring');
   measBox('Mesure : touche le <b>1er point</b>');
 });
