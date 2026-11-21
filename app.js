@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.19.0';
+const VERSION = '0.20.0';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -1784,3 +1784,10 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
 }
 
 $('qZero').addEventListener('click', () => { zeroWind = !zeroWind; store.set('vl.zeroWind', zeroWind); current.offsetManual = null; compute(); redraw(); syncQuick(); fillInputs(true); if ($('windsBox') && !$('windsBox').classList.contains('hidden')) renderWinds(); toast(zeroWind ? 'Vent forcé à 0 partout (test)' : 'Vents de la prévision'); });
+
+/* Titres de paragraphe (h3) collés sous les onglets quand on fait défiler le menu (21 nov. 2026, commun à toutes les applis) */
+(function () {
+  const s = document.getElementById('sheet'), t = s && s.querySelector('.tabs'); if (!t) return;
+  const f = () => { if (t.offsetHeight) s.style.setProperty('--h3top', ((parseFloat(getComputedStyle(t).top) || 0) + t.offsetHeight) + 'px'); };
+  if (window.ResizeObserver) new ResizeObserver(f).observe(t); window.addEventListener('resize', f); f();
+})();

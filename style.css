@@ -193,3 +193,5 @@ button,input,select,label,a{touch-action:manipulation}
 #banner .bcancel{display:inline-block;margin-top:7px;background:#111;color:#ffd400;border:1px solid #111;padding:7px 18px;font-weight:700;border-radius:9px}
 
 .seg.segbm{grid-template-columns:1fr 1fr 1fr}.seg.segbm button{font-size:14px}
+
+#sheet h3{position:sticky;top:var(--h3top,60px);z-index:1;background:#161616;padding:6px 0 5px;margin-bottom:2px}
