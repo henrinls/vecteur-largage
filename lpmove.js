@@ -11,7 +11,7 @@ const LPMove = (() => {
 #lpMenu button{background:#2c2c2c;color:#fff;border:1px solid #555;border-radius:9px;padding:10px 14px;font-size:15px;font-weight:600;text-align:left}
 #lpMenu button.lpc{color:#aaa;font-weight:500}
 #lpBar{position:fixed;z-index:3000;left:50%;transform:translateX(-50%);top:calc(86px + env(safe-area-inset-top));background:#ffd400;color:#111;font-weight:600;padding:8px 12px;border-radius:10px;max-width:92vw;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.5)}
-#lpBar button{display:inline-block;margin-left:10px;background:#111;color:#ffd400;border:1px solid #111;padding:6px 14px;font-weight:700;border-radius:9px}`;
+#lpBar{padding-right:34px}body.lpPick #banner,body.lpPick #bannerInfo{display:none!important}#lpBar button{position:absolute;top:4px;right:5px;margin:0;width:24px;height:24px;padding:0;border:none;background:transparent;color:#111;font-size:17px;font-weight:700;line-height:24px;border-radius:50%}`; /* 22 nov. 2026 (Henri) : croix en haut à droite au lieu du gros « ✕ Annuler » */
   document.head.appendChild(css);
   function close() { if (menu) { menu.remove(); menu = null; document.removeEventListener('pointerdown', outside, true); } }
   function outside(e) { if (menu && !menu.contains(e.target)) close(); }
@@ -27,13 +27,13 @@ const LPMove = (() => {
     menu.style.left = Math.max(8, Math.min(W - w - 8, x - w / 2)) + 'px'; menu.style.top = Math.max(8, Math.min(H - h - 8, y - h - 24)) + 'px';
     setTimeout(() => document.addEventListener('pointerdown', outside, true), 0);
   }
-  function cancel() { pending = null; if (bar) { bar.remove(); bar = null; } }
+  function cancel() { pending = null; document.body.classList.remove('lpPick'); if (bar) { bar.remove(); bar = null; } }
   function pick(text, fn) {
     cancel(); pending = fn;
-    bar = document.createElement('div'); bar.id = 'lpBar'; bar.innerHTML = `<span></span><button>✕ Annuler</button>`;
+    bar = document.createElement('div'); bar.id = 'lpBar'; bar.innerHTML = `<span></span><button title="Annuler">✕</button>`;
     bar.querySelector('span').textContent = text || 'Touche la carte à l\'endroit voulu';
     bar.querySelector('button').addEventListener('click', e => { e.stopPropagation(); cancel(); });
-    document.body.appendChild(bar);
+    document.body.appendChild(bar); document.body.classList.add('lpPick'); /* un seul bandeau jaune en haut : la consigne habituelle est masquée le temps du choix */
   }
   /* Le toucher qui choisit l'endroit est pris avant la carte (phase de capture) : il ne pose rien d'autre. Un glissement de
      carte (navigation) n'est pas un choix. */

@@ -19,9 +19,9 @@
   function start() {
     o.close(); marker(); active = true;
     const b = $('banner'); b.textContent = 'Touche la carte à l\'endroit où tu veux les vents.'; b.classList.remove('hidden');
-    const c = document.createElement('button'); c.className = 'bcancel'; c.textContent = '✕ Annuler';
+    const c = document.createElement('button'); c.className = 'bcancel'; c.textContent = '✕'; c.title = 'Annuler'; /* 22 nov. 2026 (Henri) : croix en haut à droite */
     c.onclick = e => { e.stopPropagation(); stop(); o.open(); sync(); };
-    b.append(document.createElement('br'), c);
+    b.classList.add('hasx'); b.append(c);
   }
   function set(p) { pt = p; o.onPick(p); sync(); }
   function init(opts) {
