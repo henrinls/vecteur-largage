@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.17.0';
+const VERSION = '0.18.0';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -1690,6 +1690,8 @@ $('btnPdf').addEventListener('click', async () => {
   } finally { b.disabled = false; b.textContent = old; }
 });
 $('pdfClose').addEventListener('click', () => $('pdfReady').classList.add('hidden'));
+/* Aperçu du PDF dans l'appli (pdfview.js, 21 nov. 2026) */
+$('pdfPreview').addEventListener('click', () => { if (pdfFile) PdfView.show(pdfFile); });
 $('pdfShare').addEventListener('click', async () => {
   if (!pdfFile) return;
   try {
