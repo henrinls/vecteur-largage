@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.16.7';
+const VERSION = '0.16.8';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -1350,7 +1350,7 @@ async function doSearch() {
   const clubs = typeof searchClubs === 'function' ? searchClubs(q) : [];
   clubs.forEach(k => {
     const li = document.createElement('li'); const b = document.createElement('button');
-    b.className = 'res club'; b.innerHTML = `<b>🪂 ${esc(k.n)}</b><br><small>Club FFP · ${esc(k.v)}</small>`;
+    b.className = 'res club'; b.innerHTML = `<b>🪂 ${esc(k.n)}</b><br><small>${esc(k.t || 'Club FFP')} · ${esc(k.v)}</small>`;
     b.onclick = () => startNewZone({ lat: k.lat, lng: k.lng }, 16);
     li.append(b); ul.append(li);
   });

@@ -1,6 +1,12 @@
 // Centres-écoles de parachutisme (FFP) : coordonnées de l'aérodrome, pour la recherche « Nouvelle zone ».
-// Commun à Setup PSV, prepo-PA et vecteur-largage. Liste établie le 19/11/2026 (fiches FFP + aérodromes OurAirports).
+// Commun à Setup PSV, prepo-PA, vecteur-largage et trace-isv. Liste établie le 19/11/2026 (fiches FFP + aérodromes OurAirports).
+// 21/11/2026 (demande d'Henri) : Lasclaveries (Pau), aérodromes de Lapalisse et d'Oloron, zone de saut militaire de Wright (Pau).
+// Champ t facultatif : type affiché à la place de « Club FFP » (aérodrome, zone militaire…).
 const CLUBS = [
+  { c: '', t: 'Centre de parachutisme', n: 'Pau Skydive / Pau Parachutisme Passion – Lasclaveries', v: 'Lasclaveries, au nord de Pau (64)', k: 'pau lasclaveries lasclaverie sclaverie la sclaverie skydive passion lfjv', lat: 43.4253, lng: -0.2869 },
+  { c: '', t: 'Aérodrome', n: 'Aérodrome de Lapalisse-Périgny', v: 'Lapalisse (03)', k: 'lapalisse la palisse perigny lfhx', lat: 46.2539, lng: 3.5886 },
+  { c: '', t: 'Aérodrome', n: 'Aérodrome d\'Oloron-Herrère', v: 'Oloron-Sainte-Marie (64)', k: 'oloron sainte marie herrere lfco', lat: 43.1636, lng: -0.5615 },
+  { c: '', t: 'Zone de saut militaire', n: 'Zone de saut de Wright (ZMT 307, ETAP)', v: 'Pau, lande du Pont-Long (64)', k: 'wright pau etap zmt 307 pont long lescar lons militaire', lat: 43.3644, lng: -0.4328 },
   { c: '8201', n: 'Bouloc Skydive – École de parachutisme Midi-Pyrénées', v: 'Bouloc-en-Quercy (82)', k: 'bouloc cardenal epmp quercy', lat: 44.3078, lng: 1.08108 },
   { c: '', n: 'Skydive Occitanie / Chutextrem – Lézignan-Corbières', v: 'Lézignan-Corbières (11)', k: 'lezignan corbieres flyzone occitanie chutextrem conilhac', lat: 43.1743, lng: 2.7404 },
   { c: '4601', n: 'Centre École de Parachutisme de Cahors', v: 'Cahors-Lalbenque (46)', k: 'cahors lalbenque cieurac', lat: 44.351398, lng: 1.47528 },
