@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.21.0';
+const VERSION = '0.22.0';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -577,7 +577,7 @@ function longPressDrag(marker, onMove, onEnd, onStart) {
   };
   const down = e => {
     if (e.touches && e.touches.length > 1) return; // deux doigts : c'est pour la carte
-    const p = pt(e); start = { x: p.clientX, y: p.clientY };
+    const p = pt(e); start = { x: p.clientX, y: p.clientY }; marker._lpMoved = false;
     clearTimeout(timer);
     timer = setTimeout(() => {
       timer = null; marker._lpDragging = true; if (onStart) onStart();
@@ -596,6 +596,8 @@ function longPressDrag(marker, onMove, onEnd, onStart) {
       return;
     }
     e.preventDefault();
+    /* 21 nov. 2026 : rien ne bouge tant que le doigt n'a pas glissé (sinon, relâché sur place = menu « Déplacer », lpmove.js) */
+    if (!marker._lpMoved) { if (Math.hypot(p.clientX - start.x, p.clientY - start.y) <= MOVE_TOL) return; marker._lpMoved = true; }
     const r = map.getContainer().getBoundingClientRect();
     const ll = map.containerPointToLatLng([p.clientX - r.left, p.clientY - r.top]);
     marker.setLatLng(ll); onMove({ lat: ll.lat, lng: ll.lng });
@@ -604,7 +606,11 @@ function longPressDrag(marker, onMove, onEnd, onStart) {
     clearTimeout(timer); timer = null; off();
     if (marker._lpDragging) {
       marker._lpDragging = false; el.classList.remove('lifting'); map.dragging.enable();
-      suppressClickUntil = Date.now() + 400; onEnd();
+      suppressClickUntil = Date.now() + 400;
+      if (marker._lpMoved || typeof LPMove === 'undefined') onEnd();
+      else { /* relâché sans glisser : menu « Déplacer » (puis toucher la carte), ou les choix propres à l'objet (marker._lpMenu) */
+        const r = map.getContainer().getBoundingClientRect(), q = map.containerPointToLatLng([start.x - r.left, start.y - r.top]), P = { lat: q.lat, lng: q.lng };
+        LPMove.open(start.x, start.y, marker._lpMenu ? marker._lpMenu(P) : LPMove.defaultItems(marker, P, onMove, onEnd, onStart)); }
     }
   };
   el.addEventListener('touchstart', down, { passive: true }); el.addEventListener('mousedown', down);
