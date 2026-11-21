@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>vecteur-largage</title>
 <link rel="stylesheet" href="vendor/leaflet.css">
-<link rel="stylesheet" href="style.css?v=0.18.0">
+<link rel="stylesheet" href="style.css?v=0.19.0">
 </head>
 <body>
 <div id="map"></div>
@@ -115,22 +115,21 @@
 
 
     <h3>Fond de carte</h3>
-    <div class="row seg">
-      <button id="bmEsri">🛰 Satellite (monde)</button>
-      <button id="bmIgn">✈︎ Photos IGN (France)</button>
+    <div class="row seg segbm">
+      <button id="bmEsri">🛰 Satellite</button>
+      <button id="bmIgn">✈︎ IGN France</button>
+      <button id="bmPhoto">📷 Photo calée</button>
     </div>
-    <p class="hint">Photos IGN : photos aériennes officielles, souvent plus nettes et plus récentes, mais seulement en France. Le hors-ligne et le PDF utilisent le fond choisi.</p>
-
-    <h3>Photo aérienne de la zone</h3>
-    <p class="hint warnline">⚠️ Uniquement une photo prise <b>à la verticale</b> (drone ou avion, appareil pointé droit vers le sol). Une photo oblique ne peut pas se caler sur la carte.</p>
-    <div class="row"><button id="btnPhoto" class="wide">📷 Importer une photo</button></div>
+    <p class="hint">IGN : photos aériennes officielles, souvent plus nettes et plus récentes, mais seulement en France. Photo calée : ta propre photo (ou image) de la zone, posée sur la carte ; autour d'elle, le dernier fond choisi. Le hors-ligne et le PDF utilisent le fond choisi.</p>
+    <p class="hint warnline" id="photoWarn">⚠️ Photo calée : uniquement une photo prise <b>à la verticale</b> (drone ou avion, appareil pointé droit vers le sol). Une photo oblique ne peut pas se caler sur la carte.</p>
     <input type="file" id="photoFile" accept="image/*" class="hidden">
     <div id="photoCtl" class="hidden">
-      <div class="row grid2"><button id="photoShow" class="wide">👁 Photo affichée</button><button id="photoRecal" class="wide">🎯 Recaler</button></div>
+      <div class="row grid2"><button id="photoRecal" class="wide">🎯 Recaler</button><button id="btnPhoto" class="wide">📷 Remplacer la photo</button></div>
       <div class="row"><label>Transparence de la photo</label><input type="range" id="photoOpacity" min="10" max="100" step="5"></div>
       <div class="row"><button id="photoDel" class="wide danger">🗑 Supprimer la photo</button></div>
     </div>
     <p class="hint">Calage en 4 appuis : un point sur la photo, le même sur la carte, puis un 2e point loin du premier. La photo reste sur ce téléphone (pas dans l'export).</p>
+
 
     <h3>Export</h3>
     <div class="row"><button id="btnPdf" class="wide primary">📄 PDF A4</button></div>
@@ -235,14 +234,14 @@
 
 <div id="toast" class="hidden"></div>
 
-<script src="vendor/leaflet.js?v=0.18.0"></script>
-<script src="vendor/leaflet-rotate.js?v=0.18.0"></script>
-<script src="geo.js?v=0.18.0"></script>
-<script src="clubs.js?v=0.18.0"></script>
-<script src="wmm.js?v=0.18.0"></script>
-<script src="windpick.js?v=0.18.0"></script>
-<script src="pdfview.js?v=0.18.0"></script>
-<script src="app.js?v=0.18.0"></script>
-<script src="photo.js?v=0.18.0"></script>
+<script src="vendor/leaflet.js?v=0.19.0"></script>
+<script src="vendor/leaflet-rotate.js?v=0.19.0"></script>
+<script src="geo.js?v=0.19.0"></script>
+<script src="clubs.js?v=0.19.0"></script>
+<script src="wmm.js?v=0.19.0"></script>
+<script src="windpick.js?v=0.19.0"></script>
+<script src="pdfview.js?v=0.19.0"></script>
+<script src="app.js?v=0.19.0"></script>
+<script src="photo.js?v=0.19.0"></script>
 </body>
 </html>

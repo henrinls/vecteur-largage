@@ -57,7 +57,10 @@ const Photo = (() => {
     const ph = current.photo, has = !!(current.id && ready(ph));
     $('photoCtl').classList.toggle('hidden', !has);
     $('btnPhoto').textContent = has ? '📷 Remplacer la photo' : '📷 Importer une photo';
-    if (has) { $('photoShow').classList.toggle('on', ph.show !== false); $('photoShow').textContent = ph.show !== false ? '👁 Photo affichée' : '👁 Photo masquée'; $('photoOpacity').value = Math.round((ph.opacity == null ? 0.85 : ph.opacity) * 100); }
+    /* 21 nov. 2026 : la photo calée est le 3e choix du fond de carte (Satellite / IGN / Photo calée), à la place du bouton « Photo affichée » */
+    const on = has && ph.show !== false; if ($('photoWarn')) $('photoWarn').classList.toggle('hidden', has);
+    if ($('bmPhoto')) { $('bmPhoto').classList.toggle('on', on); try { $('bmEsri').classList.toggle('on', !on && basemap === 'esri'); $('bmIgn').classList.toggle('on', !on && basemap === 'ign'); } catch (e) {} }
+    if (has) { $('photoOpacity').value = Math.round((ph.opacity == null ? 0.85 : ph.opacity) * 100); }
   }
 
   // ---- Import + calage en 4 appuis : photo P1 → carte P1 → photo P2 → carte P2 ----
@@ -145,7 +148,12 @@ const Photo = (() => {
   // ---- Boutons de l'onglet Zones ----
   $('btnPhoto').addEventListener('click', () => { $('photoFile').value = ''; $('photoFile').click(); });
   $('photoFile').addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) importFile(f); });
-  $('photoShow').addEventListener('click', () => { if (!current.photo) return; current.photo.show = current.photo.show === false; persist(); sync(); });
+  if ($('bmPhoto')) $('bmPhoto').addEventListener('click', () => {
+    const ph = current.photo;
+    if (current.id && ready(ph)) { if (ph.show === false) { ph.show = true; persist(); } sync(); toast('Fond : photo calée'); }
+    else { $('photoFile').value = ''; $('photoFile').click(); }
+  });
+  function hide() { const ph = current.photo; if (ph && ph.show !== false) { ph.show = false; persist(); } sync(); }
   $('photoOpacity').addEventListener('input', e => { if (!current.photo) return; current.photo.opacity = (+e.target.value) / 100; position(); persist(); });
   $('photoRecal').addEventListener('click', recal);
   $('photoDel').addEventListener('click', removePhoto);
@@ -153,6 +161,6 @@ const Photo = (() => {
   $('calCancel').addEventListener('click', () => cancelCal());
   $('calZin').addEventListener('click', () => calZoom(2));
   $('calZout').addEventListener('click', () => calZoom(0.5));
-  return { sync, onMapClick, drawPdf, clearAll, remove: id => delBlob(id).catch(() => {}) };
+  return { sync, hide, onMapClick, drawPdf, clearAll, remove: id => delBlob(id).catch(() => {}) };
 })();
 Photo.sync();
