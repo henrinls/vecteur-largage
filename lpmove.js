@@ -57,3 +57,21 @@ const LPMove = (() => {
   }
   return { open, close, pick, cancel, defaultItems, replay, get active() { return !!pending; } };
 })();
+
+/* Bandeaux jaunes du haut (#banner : consigne de placement ou d'information ; #lpBar : « Touche la carte… ») — 21 nov. 2026 (photo
+   d'Henri, trace-isv) : centrés à 86 px du haut, ils couvraient le bouton de zone et le cadre des caps. Maintenant : sous les boutons
+   du haut et à droite de la colonne de gauche. Positions lues sur les BOUTONS (jamais la largeur de #quick : bug Safari). */
+(function () {
+  const place = el => {
+    if (!el || el.classList.contains('hidden') || getComputedStyle(el).display === 'none') return; /* pas offsetParent : toujours null pour un élément fixe */
+    const q = [...document.querySelectorAll('#quick button')].map(b => b.getBoundingClientRect()).filter(r => r.height);
+    const tops = [...document.querySelectorAll('#top button, #top #capInfo')].filter(e => !e.closest('#quick')).map(e => e.getBoundingClientRect()).filter(r => r.height);
+    const top = tops.length ? Math.max(...tops.map(r => r.bottom)) + 6 : 86, left = q.length ? Math.max(...q.map(r => r.right)) + 8 : 12;
+    Object.assign(el.style, { top: `${Math.round(top)}px`, left: `${Math.round(left)}px`, right: '8px', transform: 'none', maxWidth: 'none', width: 'auto' });
+  };
+  const all = () => ['banner', 'lpBar'].forEach(id => place(document.getElementById(id)));
+  const obs = new MutationObserver(() => requestAnimationFrame(all));
+  const hook = () => { const b = document.getElementById('banner'); if (b) obs.observe(b, { attributes: true, childList: true, subtree: true, characterData: true }); obs.observe(document.body, { childList: true }); all(); };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hook); else hook();
+  window.addEventListener('resize', () => setTimeout(all, 300));
+})();
