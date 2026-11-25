@@ -11,6 +11,7 @@
     { id: 'qShowB', label: () => `Porte 2 · ${txt('qShowB')}`, svg: EYE },
     { id: 'qRec', label: 'Point de snap', svg: S('<circle cx="12" cy="12" r="8" stroke="#ffd400" stroke-dasharray="3 3"/><circle cx="12" cy="12" r="3" fill="#ffd400" stroke="#111"/>') },
     { id: 'qTicks', label: () => ($('qRelax') ? 'Rosace en degrés' : 'Graduations en degrés'), svg: S('<circle cx="12" cy="12" r="8" stroke="#fff"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4" stroke="#fff"/>') },
+    { id: 'qC20', label: 'Cercle des 20 m', svg: S('<circle cx="12" cy="12" r="6" stroke="#fff" stroke-width="1.2" stroke-dasharray="1.5 2.5"/><circle cx="12" cy="12" r="1.5" fill="#ff2020" stroke="none"/>') },
     { id: 'qSector', label: 'Secteur de finale', svg: S('<path d="M12 21L5 5a17 17 0 0 1 14 0z" stroke="#ff8c00"/>') },
     { id: 'qPrepo', label: 'Prépo', svg: S('<path d="M5 12h14M5 9v6M19 9v6" stroke="#ff2020" stroke-width="2.6"/>') },
     { id: 'qPath', label: 'Chemin 0 → vent max', svg: S('<path d="M4 18C8 16 10 10 20 6" stroke="#ffd400" stroke-dasharray="3 2"/>') },
@@ -24,7 +25,7 @@
   anchor.parentNode.insertBefore(btn, anchor.closest('.qpair') === anchor.parentNode ? anchor.parentNode : anchor);
   items.forEach(d => $(d.id).classList.add('smHidden'));
   const pop = document.createElement('div'); pop.id = 'showPop'; pop.className = 'hidden'; document.body.appendChild(pop);
-  let open = false; const visible = d => !$(d.id).classList.contains('hidden'), lab = d => (typeof d.label === 'function' ? d.label() : d.label);
+  let open = false; const visible = d => !$(d.id).classList.contains('hidden'), lab = d => ($(d.id).dataset.sm || (typeof d.label === 'function' ? d.label() : d.label)); /* data-sm sur le bouton = libellé propre à l'appli */
   function render() {
     btn.classList.toggle('on', open); btn.classList.toggle('part', items.some(d => visible(d) && !$(d.id).classList.contains('on')));
     pop.classList.toggle('hidden', !open); if (!open) return; pop.textContent = '';
