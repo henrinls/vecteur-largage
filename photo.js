@@ -114,7 +114,7 @@ const Photo = (() => {
       opacity: old.opacity == null ? 0.85 : old.opacity, show: true, ver: (old.ver || 0) + 1 };
     cancelCal(true); persist(); redraw();
     const c = corners(current.photo); map.fitBounds(L.latLngBounds(c.map(ll => [ll.lat, ll.lng])), { padding: [20, 20] });
-    toast('Photo calée. Vérifie la superposition (transparence dans l\'onglet Zones) ; sinon « Recaler ».');
+    toast('Carte calée. Vérifie la superposition (transparence dans l\'onglet Zones) ; sinon « Recaler ».');
   }
   function cancelCal(keep) {
     $('calBox').classList.add('hidden'); setBanner(null);
@@ -150,7 +150,7 @@ const Photo = (() => {
   $('photoFile').addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) importFile(f); });
   if ($('bmPhoto')) $('bmPhoto').addEventListener('click', () => {
     const ph = current.photo;
-    if (current.id && ready(ph)) { if (ph.show === false) { ph.show = true; persist(); } sync(); toast('Fond : photo calée'); }
+    if (current.id && ready(ph)) { if (ph.show === false) { ph.show = true; persist(); } sync(); toast('Fond : carte géoréférencée'); }
     else { $('photoFile').value = ''; $('photoFile').click(); }
   });
   function hide() { const ph = current.photo; if (ph && ph.show !== false) { ph.show = false; persist(); } sync(); }

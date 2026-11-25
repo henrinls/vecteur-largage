@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>vecteur-largage</title>
 <link rel="stylesheet" href="vendor/leaflet.css">
-<link rel="stylesheet" href="style.css?v=0.23.0">
+<link rel="stylesheet" href="style.css?v=0.24.0">
 </head>
 <body>
 <div id="map"></div>
@@ -123,10 +123,10 @@
     <div class="row seg segbm">
       <button id="bmEsri">🛰 Satellite</button>
       <button id="bmIgn">✈︎ IGN France</button>
-      <button id="bmPhoto">📷 Photo calée</button>
+      <button id="bmPhoto">🗺 Carte géoréf.</button>
     </div>
-    <p class="hint">IGN : photos aériennes officielles, souvent plus nettes et plus récentes, mais seulement en France. Photo calée : ta propre photo (ou image) de la zone, posée sur la carte ; autour d'elle, le dernier fond choisi. Le hors-ligne et le PDF utilisent le fond choisi.</p>
-    <p class="hint warnline" id="photoWarn">⚠️ Photo calée : uniquement une photo prise <b>à la verticale</b> (drone ou avion, appareil pointé droit vers le sol). Une photo oblique ne peut pas se caler sur la carte.</p>
+    <p class="hint">IGN : photos aériennes officielles, souvent plus nettes et plus récentes, mais seulement en France. Carte géoréférencée : ta propre carte, photo ou image de la zone, calée à la main sur la carte ; autour d'elle, le dernier fond choisi. Le hors-ligne et le PDF utilisent le fond choisi.</p>
+    <p class="hint warnline" id="photoWarn">⚠️ Carte géoréférencée à partir d'une photo : uniquement une photo prise <b>à la verticale</b> (drone ou avion, appareil pointé droit vers le sol). Une photo oblique ne peut pas se caler sur la carte.</p>
     <input type="file" id="photoFile" accept="image/*" class="hidden">
     <div id="photoCtl" class="hidden">
       <div class="row grid2"><button id="photoRecal" class="wide">🎯 Recaler</button><button id="btnPhoto" class="wide">📷 Remplacer la photo</button></div>
@@ -145,6 +145,7 @@
       <button id="btnExportZones" class="wide">⬆︎ Exporter les zones</button>
       <button id="btnImportZones" class="wide">⬇︎ Importer des zones</button>
     </div>
+    <div class="row"><button id="btnExportZone" class="wide">⬆︎ Exporter seulement la zone ouverte</button></div>
     <input type="file" id="importZonesFile" accept=".json,application/json" class="hidden">
     <div class="row"><button id="btnWipe" class="wide danger">🗑 Effacer toutes les zones</button></div>
     <p class="hint">Exporter crée un fichier avec toutes tes zones (ton prénom est demandé, il apparaît dans le nom du fichier) : à garder dans Fichiers, envoyer par AirDrop ou mail… Importer ajoute les zones d'un tel fichier aux tiennes, sans jamais en modifier ni en effacer ; elles prennent tes paramètres. Pour repartir d'un fichier : effacer les zones, puis importer. Tes paramètres sont dans l'onglet Paramètres, sauvegardés à part. Version <span id="ver"></span></p>
@@ -239,15 +240,16 @@
 
 <div id="toast" class="hidden"></div>
 
-<script src="vendor/leaflet.js?v=0.23.0"></script>
-<script src="vendor/leaflet-rotate.js?v=0.23.0"></script>
-<script src="geo.js?v=0.23.0"></script>
-<script src="clubs.js?v=0.23.0"></script>
-<script src="wmm.js?v=0.23.0"></script>
-<script src="windpick.js?v=0.23.0"></script>
-<script src="pdfview.js?v=0.23.0"></script>
-<script src="lpmove.js?v=0.23.0"></script>
-<script src="app.js?v=0.23.0"></script>
-<script src="photo.js?v=0.23.0"></script>
+<script src="vendor/leaflet.js?v=0.24.0"></script>
+<script src="vendor/leaflet-rotate.js?v=0.24.0"></script>
+<script src="geo.js?v=0.24.0"></script>
+<script src="clubs.js?v=0.24.0"></script>
+<script src="wmm.js?v=0.24.0"></script>
+<script src="windpick.js?v=0.24.0"></script>
+<script src="pdfview.js?v=0.24.0"></script>
+<script src="lpmove.js?v=0.24.0"></script>
+<script src="app.js?v=0.24.0"></script>
+<script src="showmenu.js?v=0.24.0"></script>
+<script src="photo.js?v=0.24.0"></script>
 </body>
 </html>
