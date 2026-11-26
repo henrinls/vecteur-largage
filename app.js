@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.25.4';
+const VERSION = '0.25.5';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -223,10 +223,10 @@ function nmRings() {
     if (major || gap >= 14) [[0, 1], [1, 0], [0, -1], [-1, 0]].forEach(([dx, dy]) => L.marker(LL(Geo.fromLocal(c, { x: dx * k * 0.1 * NM, y: dy * k * 0.1 * NM })), { interactive: false, icon: L.divIcon({ className: 'nmlbl', iconSize: [0, 0], html: `<span>${nmLabel(k)}</span>` }) }).addTo(grads)); // valeur aux 4 points cardinaux
   }
 }
-function dzText(sol) { // Henri : « 2,0 NM avant · décalé 0,2 NM au N », « Verticale · décalé 0,2 NM au N », « 0,5 NM après »
+function dzText(sol, short) { // Henri : « 2,0 NM avant · décalé 0,2 NM au N », « Verticale · décalé 0,2 NM au N », « 0,5 NM après »
   const d = sol && sol.dzInfo; if (!d) return '';
   const a = Math.abs(d.along) / NM < 0.05 ? 'Verticale' : `${fmtNm(Math.abs(d.along))} ${d.along >= 0 ? 'avant' : 'après'}`; // en nautiques, sans l'unité (Henri)
-  return d.lat / NM < 0.05 ? `${a} · plein axe` : `${a} · décalé ${fmtNm(d.lat)} ${AU8[card8(d.dir)]}`; // Henri : « 2,0 NM avant · plein axe », « Verticale · plein axe »
+  return d.lat / NM < 0.05 ? `${a} · plein axe` : `${a} · décalé ${fmtNm(d.lat)} ${short ? card8(d.dir) : AU8[card8(d.dir)]}`; // Henri : « 2,0 NM avant · plein axe », « Verticale · plein axe »
 }
 function prvCentroid(z) { const P = z.prvs; return { lat: P.reduce((a, p) => a + p.lat, 0) / P.length, lng: P.reduce((a, p) => a + p.lng, 0) / P.length }; }
 function elevOf(z, rec) { return typeof z.elevManual === 'number' ? z.elevManual : (rec && typeof rec.elev === 'number' ? rec.elev : (typeof z.elevAuto === 'number' ? z.elevAuto : 0)); }
@@ -517,8 +517,8 @@ function capInfo() {
   const el = $('capInfo'); if (!el) return;
   if (!sol || !sol.ok) { el.classList.add('hidden'); el.innerHTML = ''; return; }
   /* v0.25.4 (Henri) : les infos du vecteur (sorties, écart entre sorties, position du vert) passent ici ; plus d'étiquette sur le vecteur */
-  const ne = sol.exits ? sol.exits.n : 1, dtx = sol.exits && sol.exits.dt ? ` · ${fmt1(sol.exits.dt)} s` : '', dzl = dzText(sol);
-  el.innerHTML = `<div>Cap avion : <b class="vcap">${hdg(sol.heading)}</b> / ${fmtInt(sol.length)} m</div><div class="vexits">${ne} sortie${ne > 1 ? 's' : ''}${dtx}</div>${dzl ? `<div class="vdz">Vert : ${dzl}</div>` : ''}`; el.classList.remove('hidden');
+  const ne = sol.exits ? sol.exits.n : 1, dtx = sol.exits && sol.exits.dt ? ` · ${fmt1(sol.exits.dt)} s` : '', dzl = dzText(sol, true); // v0.25.5 (Henri) : « Vert 1,0 avant · décalé 0,2 N » sur une ligne
+  el.innerHTML = `<div>Cap avion : <b class="vcap">${hdg(sol.heading)}</b> / ${fmtInt(sol.length)} m</div><div class="vexits">${ne} sortie${ne > 1 ? 's' : ''}${dtx}</div>${dzl ? `<div class="vdz">Vert ${dzl}</div>` : ''}`; el.classList.remove('hidden');
 }
 function draw(light) {
   if (typeof Photo !== 'undefined') Photo.sync();
