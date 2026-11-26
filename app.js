@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.28.1';
+const VERSION = '0.28.2';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -1174,6 +1174,7 @@ WindPick.init({ map, isOpen: () => !$('windsBox').classList.contains('hidden'),
   close: () => { $('windsBox').classList.add('hidden'); syncQuick(); },
   onPick: p => { windPt = p; if (!$('windsBox').classList.contains('hidden')) setTWhen(tWhen || current.when); }, restoreBanner: () => placeBanner() });
 $('t_close').addEventListener('click', () => { $('windsBox').classList.add('hidden'); syncQuick(); });
+$('t_x').addEventListener('click', () => $('t_close').click()); /* 26/11 (Henri) : ✕ en haut à droite du tableau des vents */
 $('t_minus').addEventListener('click', () => setTWhen(shiftWhen(tWhen, -1)));
 $('t_plus').addEventListener('click', () => setTWhen(shiftWhen(tWhen, 1)));
 $('t_now').addEventListener('click', () => setTWhen(nowWhen()));
