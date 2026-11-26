@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>vecteur-largage</title>
 <link rel="stylesheet" href="vendor/leaflet.css">
-<link rel="stylesheet" href="style.css?v=0.26.0">
+<link rel="stylesheet" href="style.css?v=0.27.0">
 </head>
 <body>
 <div id="map"></div>
@@ -182,6 +182,10 @@
       <div><label>Largage (m sol)</label><input id="p_relAGL" inputmode="numeric"></div>
       <div><label>Ouverture (m sol)</label><input id="p_hOpen" inputmode="numeric"></div>
     </div>
+    <div class="grid2">
+      <div><label>Ouverture des derniers (m sol)</label><input id="p_hOpenLast" inputmode="numeric"></div>
+    </div>
+    <p class="hint">Pointillé noir au bout du vecteur : ce qui s'ajouterait si les paras de fin de passage ouvraient à cette hauteur (trait rouge sur le vecteur si cela le raccourcirait). Égale ou plus basse que l'ouverture : rien n'est dessiné.</p>
     <p class="hint">FL et m sol sont liés : la valeur saisie en dernier est gardée, l'autre est recalculée avec la pression prévue.</p>
 
     <h3>Hypothèses de calcul</h3>
@@ -250,17 +254,17 @@
 
 <div id="toast" class="hidden"></div>
 
-<script src="vendor/leaflet.js?v=0.26.0"></script>
-<script src="vendor/leaflet-rotate.js?v=0.26.0"></script>
-<script src="geo.js?v=0.26.0"></script>
-<script src="undo.js?v=0.26.0"></script>
-<script src="clubs.js?v=0.26.0"></script>
-<script src="wmm.js?v=0.26.0"></script>
-<script src="windpick.js?v=0.26.0"></script>
-<script src="pdfview.js?v=0.26.0"></script>
-<script src="lpmove.js?v=0.26.0"></script>
-<script src="app.js?v=0.26.0"></script>
-<script src="showmenu.js?v=0.26.0"></script>
-<script src="photo.js?v=0.26.0"></script>
+<script src="vendor/leaflet.js?v=0.27.0"></script>
+<script src="vendor/leaflet-rotate.js?v=0.27.0"></script>
+<script src="geo.js?v=0.27.0"></script>
+<script src="undo.js?v=0.27.0"></script>
+<script src="clubs.js?v=0.27.0"></script>
+<script src="wmm.js?v=0.27.0"></script>
+<script src="windpick.js?v=0.27.0"></script>
+<script src="pdfview.js?v=0.27.0"></script>
+<script src="lpmove.js?v=0.27.0"></script>
+<script src="app.js?v=0.27.0"></script>
+<script src="showmenu.js?v=0.27.0"></script>
+<script src="photo.js?v=0.27.0"></script>
 </body>
 </html>

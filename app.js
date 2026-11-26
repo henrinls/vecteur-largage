@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.26.0';
+const VERSION = '0.27.0';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -22,9 +22,10 @@ const TILE_CACHE = 'vl-tiles-v1';
 const DEFAULT_PARAMS = {
   vff: 50, openLoss: 100, perpTime: 15, vz: 4, glide: 2.5, hMin: 300, margin: 0, sep: 300,    // hypothèses (margin : toujours 0 depuis v0.9.3, option retirée ; sep : séparation mini entre sorties, m)
   acMs: 36.0, acType: 'pc6',                                             // avion et vitesse de largage, badin (m/s ; 70 kt : Pilatus PC-6)
-  hOpen: 1000, relMode: 'FL', relFL: 140, relAGL: 4000                   // utilisation
+  hOpen: 1000, relMode: 'FL', relFL: 140, relAGL: 4000,                  // utilisation
+  hOpenLast: 1500                                                         // v0.27.0 : ouverture des paras de fin de passage pour le pointillé « ouverture haute » (Henri)
 };
-const PROFILE_KEYS = ['vff', 'openLoss', 'perpTime', 'vz', 'glide', 'hMin', 'margin', 'sep', 'acMs', 'acType', 'hOpen', 'relMode', 'relFL', 'relAGL'];
+const PROFILE_KEYS = ['vff', 'openLoss', 'perpTime', 'vz', 'glide', 'hMin', 'margin', 'sep', 'acMs', 'acType', 'hOpen', 'relMode', 'relFL', 'relAGL', 'hOpenLast'];
 const C_START = '#1ec83c', C_END = '#ff2020', C_PRV = '#ffd400', C_PRVUSED = '#ff8c00', C_RELAX = '#00e5ff';
 const isDark = c => c === '#000000';
 const KT = 1.943844; // m/s → nœuds
@@ -503,13 +504,27 @@ let lightT = 0;
 function drawLight() { const n = performance.now(); if (n - lightT > 60) { lightT = n; draw(true); } }
 
 // Recalcule le vecteur (sans réseau : prévision gardée en mémoire)
+/* v0.27.0 (Henri) : si les paras de fin de passage ouvraient à p.hOpenLast (1 500 m par défaut) au lieu de la même hauteur que les autres,
+   jusqu'où irait le rouge ? Même axe (cap, côté et place gardés), même PRV, seul l'ouverture change ; le vert ne bouge pas.
+   Renvoie { end, d } : d > 0 = vecteur rallongé de d mètres (pointillé noir + trait), d < 0 = raccourci (trait rouge sur le vecteur). */
+function highEnd(s, prof, rec) {
+  const p = current.params, H = +p.hOpenLast;
+  if (!s || !s.ok || !(H > +p.hOpen) || !(s.hRel > H)) return null;
+  const z2 = Object.assign({}, current, { params: Object.assign({}, p, { hOpen: H }), headingOverride: s.heading, reversed: false, offsetManual: s.offsetUsed, tManual: s.tUsed, prvManual: s.prv.id });
+  const s2 = solve(z2, prof, rec); if (!s2 || !s2.ok) return null;
+  const u = s.u, e1 = Geo.toLocal(s.prv, s.end), e2 = Geo.toLocal(s.prv, s2.end), a = Geo.toLocal(s.prv, s.start);
+  const t1 = e1.x * u.x + e1.y * u.y, t2 = e2.x * u.x + e2.y * u.y, ta = a.x * u.x + a.y * u.y, d = t2 - t1;
+  if (Math.abs(d) < 1) return { end: s.end, d: 0 };
+  const t = Math.max(ta, t2); /* jamais avant le vert */
+  return { end: Geo.fromLocal(s.prv, { x: e1.x + (t - t1) * u.x, y: e1.y + (t - t1) * u.y }), d: t - t1, H };
+}
 function compute() {
   wxRec = wxCached(current.id, current.when.slice(0, 10));
   const elev = elevOf(current, wxRec);
   prof = wxProfile(wxRec, current.when, elev);
   const key = JSON.stringify([current.id, current.when, current.prvs, current.params, current.axis, current.elevManual, current.prvManual,
     current.headingOverride, current.reversed, current.offsetManual, current.tManual, elev, wxRec && wxRec.fetched, zeroWind, current.dz]);
-  if (key !== solKey) { sol = solve(current, prof, wxRec); solKey = key; }
+  if (key !== solKey) { sol = solve(current, prof, wxRec); solKey = key; try { sol.hi = highEnd(sol, prof, wxRec); } catch (e) { sol.hi = null; } }
   if (sol.ok) current.vector = { when: current.when, start: sol.start, end: sol.end, heading: sol.heading, length: Math.round(sol.length), decl: sol.decl, prv: sol.prv.id };
 }
 /* Cartouche « Cap avion » sous les boutons ronds (21 nov. 2026, repris de trace-isv à la demande d'Henri) ;
@@ -544,6 +559,7 @@ function draw(light) {
     L.polyline([a, b], { color: '#000', weight: 2.5, interactive: false }).addTo(fig);
     L.marker(a, { interactive: false, zIndexOffset: 600, icon: dotIcon(C_START, 14, '') }).addTo(fig);
     L.marker(b, { interactive: false, zIndexOffset: 600, icon: dotIcon(C_END, 14, '') }).addTo(fig);
+    drawHighEnd();
   }
   syncRotHandles(); drawGreenBarb();
   placeMarkers();
@@ -557,6 +573,26 @@ function rotTo(which, ll) {
   if (!rotPivot) return; const v = Geo.toLocal(rotPivot, ll); if (Math.hypot(v.x, v.y) < 1) return;
   let h = Math.atan2(v.x, v.y) * 180 / Math.PI; if (which === 'g') h += 180;
   current.headingOverride = n360(h); current.reversed = false; current.offsetManual = null; draw(true);
+}
+/* pointillé noir + trait perpendiculaire (ou trait rouge sur le vecteur) de l'ouverture haute des derniers (v0.27.0) */
+function hiTick(toPx, fromPx, half) { /* extrémités du trait perpendiculaire au vecteur, centré sur le point hi.end, demi-longueur half (px) */
+  const E = toPx(sol.hi.end), A = toPx(sol.start), B = toPx(sol.end); let l = Math.hypot(B.x - A.x, B.y - A.y), ax = l > 0.5 ? { x: (B.x - A.x) / l, y: (B.y - A.y) / l } : null;
+  if (!ax) { const q = toPx(Geo.fromLocal(sol.start, { x: sol.u.x * 1000, y: sol.u.y * 1000 })), m = Math.hypot(q.x - A.x, q.y - A.y) || 1; ax = { x: (q.x - A.x) / m, y: (q.y - A.y) / m }; }
+  return [{ x: E.x - ax.y * half, y: E.y + ax.x * half }, { x: E.x + ax.y * half, y: E.y - ax.x * half }].map(fromPx);
+}
+function drawHighEnd() {
+  const h = sol && sol.ok && sol.hi; if (!h || !h.d) return;
+  const px = ll => map.latLngToContainerPoint(LL(ll)), ll = q => { const r = map.containerPointToLatLng([q.x, q.y]); return [r.lat, r.lng]; };
+  const tk = hiTick(px, ll, 9);
+  if (h.d > 0) {
+    L.polyline([LL(sol.end), LL(h.end)], { color: '#fff', weight: 4.5, opacity: .55, dashArray: '7 6', interactive: false }).addTo(fig);
+    L.polyline([LL(sol.end), LL(h.end)], { color: '#000', weight: 2.5, dashArray: '7 6', interactive: false }).addTo(fig);
+    L.polyline(tk, { color: '#fff', weight: 5.5, opacity: .7, interactive: false }).addTo(fig);
+    L.polyline(tk, { color: '#000', weight: 3, interactive: false }).addTo(fig);
+  } else {
+    L.polyline(tk, { color: '#000', weight: 5.5, opacity: .6, interactive: false }).addTo(fig);
+    L.polyline(tk, { color: C_END, weight: 3, interactive: false }).addTo(fig);
+  }
 }
 function syncRotHandles() {
   const ok = sol && sol.ok && current.show.vec !== false;
@@ -818,7 +854,7 @@ function addPrv(p) {
 // Points à faire tenir à l'écran (et dans le PDF) : vecteur, PRV, zone de relaxation affichée
 function figurePoints() {
   if (!sol || !sol.ok) return current.prvs.map(p => ({ lat: p.lat, lng: p.lng }));
-  const pts = [sol.start, sol.end];
+  const pts = [sol.start, sol.end]; if (sol.hi && sol.hi.d > 0) pts.push(sol.hi.end); /* v0.27.0 : bout du pointillé d'ouverture haute dans le cadrage */
   if (current.show.relax && relaxPts) relaxPts.forEach(p => pts.push(p));
   if (current.show.rose) { const ro = roseOf(sol); [0, 90, 180, 270].forEach(a => pts.push(Geo.fromLocal(ro.c, { x: (ro.R + 60) * Math.sin(a * Math.PI / 180), y: (ro.R + 60) * Math.cos(a * Math.PI / 180) }))); }
   // PRV : seulement s'ils sont dans le cercle de relaxation (sinon ils réduiraient trop le zoom)
@@ -950,7 +986,7 @@ const HYP = ['vff', 'openLoss', 'perpTime', 'hMin', 'sep']; // vitesses sous voi
 function setParam(k, v) { current.params[k] = v; profile[k] = v; store.set('vl.profile', profile); zones.forEach(applyProfile); store.set('vl.zones', zones); }
 function fillInputs(only) {
   const p = current.params;
-  HYP.concat(['hOpen']).forEach(k => { const el = $('p_' + k); if (el && document.activeElement !== el) el.value = String(p[k]).replace('.', ','); });
+  HYP.concat(['hOpen', 'hOpenLast']).forEach(k => { const el = $('p_' + k); if (el && document.activeElement !== el) el.value = String(p[k]).replace('.', ','); });
   // largage : FL et m sol liés (on garde la valeur saisie en dernier, l'autre est recalculée avec la prévision)
   const elev = elevOf(current, wxRec);
   const agl = p.relMode === 'AGL' ? +p.relAGL : flToAgl(+p.relFL, prof, elev), fl = p.relMode === 'FL' ? +p.relFL : aglToFl(+p.relAGL, prof, elev);
@@ -970,7 +1006,7 @@ function fillInputs(only) {
   syncQuick(); syncJump();
   $('zoneName').textContent = current.name + (current.id ? '' : ' (non enregistrée)');
 }
-HYP.concat(['hOpen']).forEach(k => {
+HYP.concat(['hOpen', 'hOpenLast']).forEach(k => {
   $('p_' + k).addEventListener('input', e => { const v = numIn(e.target); if (isNaN(v)) return; setParam(k, v); persist(); redraw(); });
   $('p_' + k).addEventListener('blur', () => fillInputs(true));
 });
@@ -1708,6 +1744,11 @@ async function renderPdfCanvas() {
   { const a = toC(sol.start), b = toC(sol.end);
     g.save(); g.lineCap = 'round'; g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 10 * u; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
     g.strokeStyle = '#000'; g.lineWidth = 5 * u; g.stroke(); g.restore();
+    { const h = sol.hi; if (h && h.d) { /* v0.27.0 : ouverture haute des derniers, comme à l'écran */
+      const E = toC(h.end), A0 = toC(sol.start), B0 = toC(sol.end), l = Math.hypot(B0.x - A0.x, B0.y - A0.y) || 1, ax = { x: (B0.x - A0.x) / l, y: (B0.y - A0.y) / l }, hf = 9 * u;
+      const T1 = { x: E.x - ax.y * hf, y: E.y + ax.x * hf }, T2 = { x: E.x + ax.y * hf, y: E.y - ax.x * hf }, seg = (P, Q, col, w, dash) => { g.save(); g.lineCap = 'butt'; g.strokeStyle = col; g.lineWidth = w; g.setLineDash(dash || []); g.beginPath(); g.moveTo(P.x, P.y); g.lineTo(Q.x, Q.y); g.stroke(); g.restore(); };
+      if (h.d > 0) { seg(B0, E, 'rgba(255,255,255,.55)', 4.5 * u, [7 * u, 6 * u]); seg(B0, E, '#000', 2.5 * u, [7 * u, 6 * u]); seg(T1, T2, 'rgba(255,255,255,.7)', 5.5 * u); seg(T1, T2, '#000', 3 * u); }
+      else { seg(T1, T2, 'rgba(0,0,0,.6)', 5.5 * u); seg(T1, T2, C_END, 3 * u); } } }
     dot(sol.start, C_START, 9); dot(sol.end, C_END, 9); // même taille que les PRV, comme à l'écran
     { const bw = sol.windRel && barbWind(toC, sol.windRel, sol.start); if (bw) { const p = greenBarbPos(toC, 24 * u), bg = barbAt(bw, u, p.c.x, p.c.y); g.save(); g.lineCap = 'round'; /* v0.25.7 : vent de largage à côté du vert */
       const st = (col, w) => { g.strokeStyle = col; g.lineWidth = w; bg.lines.forEach(([p0, q]) => { g.beginPath(); g.moveTo(p0.x, p0.y); g.lineTo(q.x, q.y); g.stroke(); }); if (bg.calm) { g.beginPath(); g.arc(bg.T.x, bg.T.y, 2.5 * u, 0, 2 * Math.PI); g.stroke(); } };
