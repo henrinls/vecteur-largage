@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.25.3';
+const VERSION = '0.25.4';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -516,7 +516,9 @@ function compute() {
 function capInfo() {
   const el = $('capInfo'); if (!el) return;
   if (!sol || !sol.ok) { el.classList.add('hidden'); el.innerHTML = ''; return; }
-  el.innerHTML = `<div>Cap avion : ${hdg(sol.heading)} / ${fmtInt(sol.length)} m</div>`; el.classList.remove('hidden');
+  /* v0.25.4 (Henri) : les infos du vecteur (sorties, écart entre sorties, position du vert) passent ici ; plus d'étiquette sur le vecteur */
+  const ne = sol.exits ? sol.exits.n : 1, dtx = sol.exits && sol.exits.dt ? ` · ${fmt1(sol.exits.dt)} s` : '', dzl = dzText(sol);
+  el.innerHTML = `<div>Cap avion : <b class="vcap">${hdg(sol.heading)}</b> / ${fmtInt(sol.length)} m</div><div class="vexits">${ne} sortie${ne > 1 ? 's' : ''}${dtx}</div>${dzl ? `<div class="vdz">Vert : ${dzl}</div>` : ''}`; el.classList.remove('hidden');
 }
 function draw(light) {
   if (typeof Photo !== 'undefined') Photo.sync();
@@ -685,16 +687,7 @@ function placeMarkers() {
     if (vecHit.line._path && vecHit.attachedEl !== vecHit.line._path) { vecHit.attachedEl = vecHit.line._path; const handle = vecHit.handle;
       longPressDrag(handle, ll => { setManualPoint(ll); draw(true); }, () => { if (sol && sol.ok) { current.offsetManual = sol.offsetUsed; current.tManual = sol.tUsed; } persist(); redraw(); toast('Vecteur déplacé. « Vect. auto » (à gauche) pour revenir au meilleur placement.'); });
     }
-    // Étiquette : cap magnétique et longueur
-    const mid = labelPos();
-    const ne = sol.exits ? sol.exits.n : 1;
-    const dtx = sol.exits && sol.exits.dt ? ` · <b class="vexits">${fmt1(sol.exits.dt)} s</b>` : '';
-    const dzl = dzText(sol);
-    const html = `<span><b class="vcap">${hdg(sol.heading)}</b> · ${fmtInt(sol.length)} m · <b class="vexits">${ne} sortie${ne > 1 ? 's' : ''}</b>${dtx}${dzl ? `<br><i class="vdz">Vert : ${dzl}</i>` : ''}</span>`;
-    if (!vecLabel) { vecLabel = L.marker(LL(mid), { zIndexOffset: 1200, icon: L.divIcon({ className: 'vlabel', iconSize: [0, 0], html }) }).addTo(map); vecLabel._html = html; }
-    else { vecLabel.setLatLng(LL(mid)); if (vecLabel._html !== html) { vecLabel.setIcon(L.divIcon({ className: 'vlabel', iconSize: [0, 0], html })); vecLabel._html = html; } }
-    if (current.show.label === false) { if (map.hasLayer(vecLabel)) map.removeLayer(vecLabel); }
-    else if (!map.hasLayer(vecLabel)) vecLabel.addTo(map);
+    if (vecLabel && map.hasLayer(vecLabel)) map.removeLayer(vecLabel); // v0.25.4 : plus d'étiquette sur le vecteur (infos dans le cartouche du cap)
     /* v0.25.1 (Henri) : plus d'appui long sur le cartouche (ancienne fenêtre de saisie du cap supprimée) : le cap se règle dans Zones › Cap de largage */
   } else {
     if (vecHit && map.hasLayer(vecHit.line)) map.removeLayer(vecHit.line);
@@ -967,14 +960,14 @@ function syncQuick() {
   const AC_SHORT = { pc6: 'PC-6', c208: 'Caravan', dhc6: 'Twin', cn235: 'CN235', a400: 'A400M' }, acT = AIRCRAFT[p.acType] && Math.round(p.acMs * KT) === AIRCRAFT[p.acType][1] ? AC_SHORT[p.acType] : `${Math.round(p.acMs * KT)} kt`;
   $('qWhen').innerHTML = `🕑 ${fmtWhen(current.when)}<br><b>FL${flQ}</b><br>ouv. ${fmtInt(p.hOpen)} m<br>✈ ${acT}`; // un seul bouton : date, heure, largage, ouverture
   $('qZero').classList.toggle('on', zeroWind);
-  $('qRelax').classList.toggle('on', !!current.show.relax); $('qLabel').classList.toggle('on', current.show.label !== false); $('qNm').classList.toggle('on', !!current.show.nm); $('qTicks').classList.toggle('on', !!current.show.rose);
+  $('qRelax').classList.toggle('on', !!current.show.relax); $('qNm').classList.toggle('on', !!current.show.nm); $('qTicks').classList.toggle('on', !!current.show.rose);
   $('qRev').classList.toggle('on', !!current.reversed);
   $('qPrv').textContent = 'PRV auto'; $('qPrv').classList.toggle('hidden', !current.prvManual); // n'apparaît qu'après un choix manuel
   $('qVecAuto').disabled = !vecManual(); /* v0.25.3 : dans le sous-menu du bouton Vecteur, grisé quand rien n'est à la main */ $('qVec').classList.toggle('on', !!vecPopOpen);
   $('qWinds').classList.toggle('on', !$('windsBox').classList.contains('hidden'));
 }
 function quick(fn, msg) { fn(); syncQuick(); persist(); redraw(); if (msg) toast(msg()); }
-$('qLabel').addEventListener('click', () => quick(() => { current.show.label = current.show.label === false; }, () => current.show.label !== false ? 'Infos du vecteur affichées' : 'Infos du vecteur masquées'));
+/* v0.25.4 : bouton « Infos du vecteur » retiré (infos dans le cartouche du cap) */
 $('qNm').addEventListener('click', () => { if (!current.dz) return toast('Place d\'abord le centre de la DZ (☰ Zones)'); quick(() => { current.show.nm = !current.show.nm; }, () => current.show.nm ? 'Cercles tous les 0,1 NM autour de la DZ' : 'Cercles NM masqués'); });
 $('qTicks').addEventListener('click', () => quick(() => { current.show.rose = !current.show.rose; }, () => current.show.rose ? 'Rosace en degrés magnétiques autour du vecteur' : 'Rosace masquée'));
 $('qRelax').addEventListener('click', () => quick(() => { current.show.relax = !current.show.relax; }, () => current.show.relax ? 'Zone de relaxation affichée' : 'Zone de relaxation masquée'));
