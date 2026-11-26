@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.28.0';
+const VERSION = '0.28.1';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -781,8 +781,8 @@ function placeMarkers() {
   Object.keys(prvMarkers).forEach(id => { if (!current.prvs.find(p => p.id === id)) { map.removeLayer(prvMarkers[id]); delete prvMarkers[id]; } });
   current.prvs.forEach(p => {
     let m = prvMarkers[p.id];
-    if (!m) { m = prvMarkers[p.id] = L.marker(LL(p), { icon: prvIcon(p.id === usedId), zIndexOffset: 800 }).addTo(map); m._used = p.id === usedId; longPressAction(m, () => prvMenu(p.id)); m.on('click', ev => { L.DomEvent.stop(ev); prvTap(p.id); }); }
-    else { m.setLatLng(LL(p)); if (m._used !== (p.id === usedId)) { m.setIcon(prvIcon(p.id === usedId)); m._used = p.id === usedId; longPressAction(m, () => prvMenu(p.id)); } }
+    if (!m) { m = prvMarkers[p.id] = L.marker(LL(p), { icon: prvIcon(p.id === usedId), zIndexOffset: 800 }).addTo(map); m._used = p.id === usedId; prvDrag(m, p.id); m.on('click', ev => { L.DomEvent.stop(ev); prvTap(p.id); }); }
+    else { if (!m._lpDragging) m.setLatLng(LL(p)); if (m._used !== (p.id === usedId)) { m._used = p.id === usedId; const el = m.getElement(); if (el) el.classList.toggle('used', m._used); } } /* jamais setIcon : il recrée l'élément et le doigt perd le PRV pendant un glissement */
   });
   // Trait du vecteur : appui long puis glisser = déplacer (longueur recalculée, même axe)
   if (sol && sol.ok) {
@@ -834,16 +834,18 @@ function prvTap(id) {
   if (!current.prvs.find(x => x.id === id)) return;
   current.prvManual = id; current.offsetManual = null; persist(); redraw(); toast('PRV choisi à la main. « PRV auto » pour revenir au choix automatique.');
 }
-async function prvMenu(id) {
-  const p = current.prvs.find(x => x.id === id); if (!p) return;
-  const used = sol && sol.prv && sol.prv.id === id;
-  const res = await ask(used ? (current.prvManual ? 'Ce PRV est la référence (choisi à la main).' : 'Ce PRV est la référence (choix automatique).') : 'Utiliser ce point de rendez-vous comme référence ?', undefined, 'Supprimer', used ? 'OK' : 'Utiliser');
-  if (res === 'DELETE') {
-    if (!(await ask('Supprimer ce point de rendez-vous ?'))) return;
-    current.prvs = current.prvs.filter(x => x.id !== id); if (current.prvManual === id) current.prvManual = null;
-    persist(); redraw(); return;
-  }
-  if (res === true && !used) { current.prvManual = id; current.offsetManual = null; persist(); redraw(); toast('PRV choisi à la main. « PRV auto » pour revenir au choix automatique.'); }
+/* v0.28.1 (26 nov. 2026, Henri) : un PRV se déplace comme le reste (centre de la DZ, vecteur…), y compris pendant la mise en place guidée :
+   appui long puis glisser ; appui long relâché sans glisser → menu « ✥ Déplacer » / « Utiliser comme référence » / « 🗑 Supprimer ». Avant : fenêtre Utiliser / Supprimer seulement. */
+function prvDrag(m, id) {
+  const pr = () => current.prvs.find(x => x.id === id);
+  const onMove = ll => { const p = pr(); if (!p) return; p.lat = ll.lat; p.lng = ll.lng; draw(true); }, onEnd = () => { persist(); redraw(); };
+  longPressDrag(m, onMove, onEnd);
+  m._lpMenu = P => {
+    const used = sol && sol.prv && sol.prv.id === id, it = [{ label: '✥ Déplacer', fn: () => LPMove.pick(null, ll => LPMove.replay(m, P, ll, onMove, onEnd)) }];
+    if (!used) it.push({ label: '◎ Utiliser comme référence', fn: () => { current.prvManual = id; current.offsetManual = null; persist(); redraw(); toast('PRV choisi à la main. « PRV auto » pour revenir au choix automatique.'); } });
+    it.push({ label: '🗑 Supprimer', fn: async () => { if (!(await ask('Supprimer ce point de rendez-vous ?'))) return; current.prvs = current.prvs.filter(x => x.id !== id); if (current.prvManual === id) current.prvManual = null; persist(); redraw(); } });
+    return it;
+  };
 }
 // Cap à la main (onglet Zones › Cap de largage) : champ + boutons −5 −1 +1 +5 et Auto (v0.25.0)
 function capMagNow() { return sol && sol.ok ? n360(sol.heading - sol.decl) : null; }
@@ -860,7 +862,7 @@ $('z_capAuto').addEventListener('click', () => { current.headingOverride = null;
 function addPrv(p) {
   current.prvs.push({ id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), lat: p.lat, lng: p.lng });
   persist(); redraw();
-  toast(`PRV placé (${current.prvs.length}). Appui long sur un PRV : l'utiliser comme référence ou le supprimer.`);
+  toast(`PRV placé (${current.prvs.length}). Appui long dessus pour le déplacer, le choisir ou le supprimer.`);
   ensureWx(false); if (wiz === 'P') wizGo('P'); // mise en place guidée : « PRV n° 2 ? »
 }
 
