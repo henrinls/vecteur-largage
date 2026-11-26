@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.24.3';
+const VERSION = '0.24.4';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -980,7 +980,7 @@ async function ensureWx(force, date) {
   catch (e) { wxFailed[date] = true; toast(have ? 'Pas de réseau : prévision gardée, téléchargée le ' + fmtFetched(have.fetched) : 'Prévision impossible à télécharger (réseau ?)'); return have; }
   finally { wxBusy = false; redraw(); setTimeout(() => fillInputs(true), 0); syncJump(); }
 }
-function setWhen(w) { current.holdWx = false; current.when = w; current.offsetManual = null; persist(); redraw(); syncJump(); ensureWx(false); }
+function setWhen(w) { current.holdWx = false; current.when = w; setTimeout(() => { try { syncTUse(); } catch (e) { } }, 0); current.offsetManual = null; persist(); redraw(); syncJump(); ensureWx(false); }
 $('qWhen').addEventListener('click', () => { const b = $('jumpBox'); b.style.left = Math.round(Math.max($('quick').getBoundingClientRect().right, ...[...$('quick').querySelectorAll('button')].map(x => x.getBoundingClientRect().right)) + 6) + 'px'; /* boutons, pas la colonne (bug flex-wrap de Safari) */ b.classList.toggle('hidden'); }); // fenêtre calée à droite de la colonne, quelle que soit sa largeur
 $('jumpOk').addEventListener('click', () => { $('jumpBox').classList.add('hidden'); if (sol && sol.ok) fitFigure(); });
 $('j_minus').addEventListener('click', () => setWhen(shiftWhen(current.when, -1)));
@@ -1021,7 +1021,9 @@ function windRows(pr, elev) { // une ligne par tranche de 1 000 ft (FL), de la s
   for (let fl = Math.max(10, fl0); fl <= 400; fl += 10) { const h = flToAgl(fl, pr, elev); if (h > 10000) break; if (h > 20) add('FL' + String(fl).padStart(3, '0'), h); }
   return rows;
 }
-async function setTWhen(w) { tWhen = w; renderWinds(); if (windPt) { const p0 = windPt; await ensurePick(w.slice(0, 10)); if (windPt === p0) renderWinds(); return; } const d = w.slice(0, 10); if (!wxCached(current.id, d) || Date.now() - wxCached(current.id, d).fetched > 3600e3 || wxCached(current.id, d).rh === undefined) { await ensureWx(false, d); renderWinds(); } }
+/* v0.24.4 (Henri, repris de trace-isv) : choisir dans le tableau des vents la date et l'heure du CALCUL (bouton 🕑 du haut, vecteur) */
+function syncTUse() { const b = $('t_use'); if (b) b.classList.toggle('hidden', !tWhen || tWhen === current.when || $('windsBox').classList.contains('hidden')); }
+async function setTWhen(w) { tWhen = w; syncTUse(); renderWinds(); if (windPt) { const p0 = windPt; await ensurePick(w.slice(0, 10)); if (windPt === p0) renderWinds(); return; } const d = w.slice(0, 10); if (!wxCached(current.id, d) || Date.now() - wxCached(current.id, d).fetched > 3600e3 || wxCached(current.id, d).rh === undefined) { await ensureWx(false, d); renderWinds(); } }
 $('qWinds').addEventListener('click', () => { const b = $('windsBox'); if (!b.classList.contains('hidden')) { b.classList.add('hidden'); syncQuick(); WindPick.sync(); return; } WindPick.reset(); b.classList.remove('hidden'); syncQuick(); setTWhen(current.when); });
 WindPick.init({ map, isOpen: () => !$('windsBox').classList.contains('hidden'),
   open: () => { $('windsBox').classList.remove('hidden'); syncQuick(); setTWhen(tWhen || current.when); },
@@ -1031,6 +1033,7 @@ $('t_close').addEventListener('click', () => { $('windsBox').classList.add('hidd
 $('t_minus').addEventListener('click', () => setTWhen(shiftWhen(tWhen, -1)));
 $('t_plus').addEventListener('click', () => setTWhen(shiftWhen(tWhen, 1)));
 $('t_now').addEventListener('click', () => setTWhen(nowWhen()));
+$('t_use').addEventListener('click', () => { const w = tWhen; setWhen(w); syncTUse(); toast(`Calcul à la date et l'heure du tableau : ${fmtWhen(w)}`); });
 $('t_date').addEventListener('change', e => { if (e.target.value) setTWhen(e.target.value + tWhen.slice(10)); });
 $('t_hour').addEventListener('change', e => setTWhen(tWhen.slice(0, 11) + e.target.value + ':00'));
 
