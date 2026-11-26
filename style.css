@@ -216,3 +216,10 @@ button,input,select,label,a{touch-action:manipulation}
 #showPop button.spx{min-height:34px;min-width:44px;justify-content:center;padding:0;background:#3a3a3a;border-color:#888;color:#fff;font-size:16px;font-weight:700}
 #showPop button svg{flex:none;opacity:.4}#showPop button.on{color:#fff;border-color:#00e5ff;background:#1b3b42}#showPop button.on svg{opacity:1}#showPop button:not(.on) span{text-decoration:line-through}
 #showPop button{max-width:100%;min-width:0}#showPop button span{overflow:hidden;text-overflow:ellipsis}
+
+/* bouton Annuler (undo.js, 26 nov. 2026) : petit carré à droite de Paramètres / Manœuvre */
+#top .parRow{display:flex;gap:6px;align-items:stretch}#top .parRow>*{pointer-events:auto}
+#btnUndo,#btnRedo{width:44px;min-width:44px;padding:0;display:flex;align-items:center;justify-content:center;color:#fff}#btnUndo:disabled,#btnRedo:disabled{opacity:.35}
+/* écran étroit (téléphone) : ⚙ seul, pour que ↶ ↷ tiennent à côté sans pousser les boutons ronds hors de l'écran */
+@media (max-width:440px){#top .parRow .plab{display:none}}
+#top .round{flex-shrink:0}

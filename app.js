@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.25.7';
+const VERSION = '0.26.0';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -190,6 +190,7 @@ function persist() {
     const i = zones.findIndex(z => z.id === current.id);
     if (i >= 0) { zones[i] = clone(current); store.set('vl.zones', zones); }
   }
+  if (typeof Undo !== 'undefined') Undo.record(); /* undo.js : photo de l'état après chaque enregistrement */
 }
 
 const n360 = h => ((h % 360) + 360) % 360;
@@ -1937,3 +1938,12 @@ $('qZero').addEventListener('click', () => { zeroWind = !zeroWind; store.set('vl
 })();
 /* v0.25.0 (Henri) : le cadre du cap en haut ouvre l'onglet Zones au chapitre « Cap de largage » (axe imposé, puis cap à la main) */
 $('capInfo').addEventListener('click', () => { openSheet('zones'); setTimeout(() => { const s = $('capSec'), sh = $('sheet'), tb = sh.querySelector('.tabs'); if (!s) return; sh.scrollTop += s.getBoundingClientRect().top - sh.getBoundingClientRect().top - (tb ? tb.offsetHeight + 30 : 80); }, 60); /* titre juste sous les onglets (titres et onglets collants) */ });
+
+/* 26 nov. 2026 (Henri, toutes les applis carte) : boutons ↶ ↷ à côté de « Paramètres » qui annule la dernière action (undo.js) */
+$('btnUndo').innerHTML = Undo.ICON; $('btnRedo').innerHTML = Undo.ICON_REDO; /* et ↷ juste à côté pour rétablir l'action annulée */
+Undo.init({ toast, ignore: ['vector'], state: () => ({ key: current.id || '', obj: current }),
+  restore: o => {
+    current = upgrade(Object.assign(o, { center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing() }));
+    if (current.params) { PROFILE_KEYS.forEach(k => { if (k in current.params) profile[k] = current.params[k]; }); store.set('vl.profile', profile); zones.forEach(applyProfile); }
+    resetMarkers(); placing = null; setBanner(null); stopMeasure(); fillInputs(); /* Henri : ni onglet, ni fenêtre, ni zoom ne changent */ redraw(); persist();
+  } });

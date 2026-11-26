@@ -12,14 +12,18 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>vecteur-largage</title>
 <link rel="stylesheet" href="vendor/leaflet.css">
-<link rel="stylesheet" href="style.css?v=0.25.7">
+<link rel="stylesheet" href="style.css?v=0.26.0">
 </head>
 <body>
 <div id="map"></div>
 
 <header id="top">
   <div class="leftcol">
-    <button id="btnParams" class="pill" title="Paramètres">⚙ Paramètres</button>
+    <div class="parRow">
+      <button id="btnParams" class="pill" title="Paramètres">⚙<span class="plab"> Paramètres</span></button>
+      <button id="btnUndo" class="pill" title="Annuler la dernière action" disabled></button>
+      <button id="btnRedo" class="pill" title="Rétablir l'action annulée" disabled></button>
+    </div>
     <button id="btnZones" class="pill" title="Zones">☰ <span id="zoneName">Nouvelle zone</span></button>
   </div>
   <div class="spacer"></div>
@@ -246,16 +250,17 @@
 
 <div id="toast" class="hidden"></div>
 
-<script src="vendor/leaflet.js?v=0.25.7"></script>
-<script src="vendor/leaflet-rotate.js?v=0.25.7"></script>
-<script src="geo.js?v=0.25.7"></script>
-<script src="clubs.js?v=0.25.7"></script>
-<script src="wmm.js?v=0.25.7"></script>
-<script src="windpick.js?v=0.25.7"></script>
-<script src="pdfview.js?v=0.25.7"></script>
-<script src="lpmove.js?v=0.25.7"></script>
-<script src="app.js?v=0.25.7"></script>
-<script src="showmenu.js?v=0.25.7"></script>
-<script src="photo.js?v=0.25.7"></script>
+<script src="vendor/leaflet.js?v=0.26.0"></script>
+<script src="vendor/leaflet-rotate.js?v=0.26.0"></script>
+<script src="geo.js?v=0.26.0"></script>
+<script src="undo.js?v=0.26.0"></script>
+<script src="clubs.js?v=0.26.0"></script>
+<script src="wmm.js?v=0.26.0"></script>
+<script src="windpick.js?v=0.26.0"></script>
+<script src="pdfview.js?v=0.26.0"></script>
+<script src="lpmove.js?v=0.26.0"></script>
+<script src="app.js?v=0.26.0"></script>
+<script src="showmenu.js?v=0.26.0"></script>
+<script src="photo.js?v=0.26.0"></script>
 </body>
 </html>
