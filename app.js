@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.27.1';
+const VERSION = '0.27.2';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -140,7 +140,7 @@ const store = {
   del(k) { try { localStorage.removeItem(k); } catch (e) {} }
 };
 const clone = o => JSON.parse(JSON.stringify(o));
-const SHOW_DEFAULT = { relax: true, label: true, rose: false, nm: false };
+const SHOW_DEFAULT = { relax: true, label: true, rose: false, nm: false, hi: true }; /* hi (v0.27.2) : prolongation « ouverture haute des derniers » */
 function upgrade(z) {
   if (!z) return z;
   z.params = Object.assign({}, DEFAULT_PARAMS, z.params || {});
@@ -587,7 +587,7 @@ function hiSide(toPx) { /* côté du texte : perpendiculaire au vecteur, à l'op
 }
 const hiText = h => h.n ? `${h.n} sortie${h.n > 1 ? 's' : ''}` : '';
 function drawHighEnd() {
-  const h = sol && sol.ok && sol.hi; if (!h || !h.d) return;
+  const h = sol && sol.ok && current.show.hi !== false && sol.hi; if (!h || !h.d) return; /* v0.27.2 : masquable par Affichage */
   const px = ll => map.latLngToContainerPoint(LL(ll)), ll = q => { const r = map.containerPointToLatLng([q.x, q.y]); return [r.lat, r.lng]; };
   const tk = hiTick(px, ll, 9);
   if (h.d > 0) {
@@ -866,7 +866,7 @@ function addPrv(p) {
 // Points à faire tenir à l'écran (et dans le PDF) : vecteur, PRV, zone de relaxation affichée
 function figurePoints() {
   if (!sol || !sol.ok) return current.prvs.map(p => ({ lat: p.lat, lng: p.lng }));
-  const pts = [sol.start, sol.end]; if (sol.hi && sol.hi.d > 0) pts.push(sol.hi.end); /* v0.27.0 : bout du pointillé d'ouverture haute dans le cadrage */
+  const pts = [sol.start, sol.end]; if (sol.hi && sol.hi.d > 0 && current.show.hi !== false) pts.push(sol.hi.end); /* v0.27.0 : bout du pointillé d'ouverture haute dans le cadrage */
   if (current.show.relax && relaxPts) relaxPts.forEach(p => pts.push(p));
   if (current.show.rose) { const ro = roseOf(sol); [0, 90, 180, 270].forEach(a => pts.push(Geo.fromLocal(ro.c, { x: (ro.R + 60) * Math.sin(a * Math.PI / 180), y: (ro.R + 60) * Math.cos(a * Math.PI / 180) }))); }
   // PRV : seulement s'ils sont dans le cercle de relaxation (sinon ils réduiraient trop le zoom)
@@ -1068,7 +1068,7 @@ function syncQuick() {
   const AC_SHORT = { pc6: 'PC-6', c208: 'Caravan', dhc6: 'Twin', cn235: 'CN235', a400: 'A400M' }, acT = AIRCRAFT[p.acType] && Math.round(p.acMs * KT) === AIRCRAFT[p.acType][1] ? AC_SHORT[p.acType] : `${Math.round(p.acMs * KT)} kt`;
   $('qWhen').innerHTML = `🕑 ${fmtWhen(current.when)}<br><b>FL${flQ}</b><br>ouv. ${fmtInt(p.hOpen)} m<br>✈ ${acT}`; // un seul bouton : date, heure, largage, ouverture
   $('qZero').classList.toggle('on', zeroWind);
-  $('qRelax').classList.toggle('on', !!current.show.relax); $('qNm').classList.toggle('on', !!current.show.nm); $('qTicks').classList.toggle('on', !!current.show.rose);
+  $('qRelax').classList.toggle('on', !!current.show.relax); $('qNm').classList.toggle('on', !!current.show.nm); $('qHi').classList.toggle('on', current.show.hi !== false); $('qTicks').classList.toggle('on', !!current.show.rose);
   $('qRev').classList.toggle('on', !!current.reversed);
   $('qPrv').textContent = 'PRV auto'; $('qPrv').classList.toggle('hidden', !current.prvManual); // n'apparaît qu'après un choix manuel
   $('qVecAuto').disabled = !vecManual(); /* v0.25.3 : dans le sous-menu du bouton Vecteur, grisé quand rien n'est à la main */ $('qVec').classList.toggle('on', !!vecPopOpen);
@@ -1076,6 +1076,7 @@ function syncQuick() {
 }
 function quick(fn, msg) { fn(); syncQuick(); persist(); redraw(); if (msg) toast(msg()); }
 /* v0.25.4 : bouton « Infos du vecteur » retiré (infos dans le cartouche du cap) */
+$('qHi').addEventListener('click', () => quick(() => { current.show.hi = current.show.hi === false; }, () => current.show.hi !== false ? 'Ouverture haute des derniers affichée' : 'Ouverture haute des derniers masquée')); /* v0.27.2 (Henri) */
 $('qNm').addEventListener('click', () => { if (!current.dz) return toast('Place d\'abord le centre de la DZ (☰ Zones)'); quick(() => { current.show.nm = !current.show.nm; }, () => current.show.nm ? 'Cercles tous les 0,1 NM autour de la DZ' : 'Cercles NM masqués'); });
 $('qTicks').addEventListener('click', () => quick(() => { current.show.rose = !current.show.rose; }, () => current.show.rose ? 'Rosace en degrés magnétiques autour du vecteur' : 'Rosace masquée'));
 $('qRelax').addEventListener('click', () => quick(() => { current.show.relax = !current.show.relax; }, () => current.show.relax ? 'Zone de relaxation affichée' : 'Zone de relaxation masquée'));
@@ -1756,7 +1757,7 @@ async function renderPdfCanvas() {
   { const a = toC(sol.start), b = toC(sol.end);
     g.save(); g.lineCap = 'round'; g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 10 * u; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
     g.strokeStyle = '#000'; g.lineWidth = 5 * u; g.stroke(); g.restore();
-    { const h = sol.hi; if (h && h.d) { /* v0.27.0 : ouverture haute des derniers, comme à l'écran */
+    { const h = current.show.hi !== false && sol.hi; if (h && h.d) { /* v0.27.0 : ouverture haute des derniers, comme à l'écran */
       const E = toC(h.end), A0 = toC(sol.start), B0 = toC(sol.end), l = Math.hypot(B0.x - A0.x, B0.y - A0.y) || 1, ax = { x: (B0.x - A0.x) / l, y: (B0.y - A0.y) / l }, hf = 9 * u;
       const T1 = { x: E.x - ax.y * hf, y: E.y + ax.x * hf }, T2 = { x: E.x + ax.y * hf, y: E.y - ax.x * hf }, seg = (P, Q, col, w, dash) => { g.save(); g.lineCap = 'butt'; g.strokeStyle = col; g.lineWidth = w; g.setLineDash(dash || []); g.beginPath(); g.moveTo(P.x, P.y); g.lineTo(Q.x, Q.y); g.stroke(); g.restore(); };
       if (h.d > 0) { seg(B0, E, 'rgba(255,255,255,.55)', 4.5 * u, [7 * u, 6 * u]); seg(B0, E, '#000', 2.5 * u, [7 * u, 6 * u]); seg(T1, T2, 'rgba(255,255,255,.7)', 5.5 * u); seg(T1, T2, '#000', 3 * u); }

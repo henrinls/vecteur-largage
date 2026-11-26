@@ -17,7 +17,8 @@
     { id: 'qPath', label: 'Chemin 0 → vent max', svg: S('<path d="M4 18C8 16 10 10 20 6" stroke="#ffd400" stroke-dasharray="3 2"/>') },
     { id: 'qReperes', label: 'Repères', svg: S('<rect x="7" y="7" width="10" height="10" transform="rotate(45 12 12)" fill="#fff" stroke="#111"/>') },
     { id: 'qRelax', label: 'Zone de relaxation', svg: S('<circle cx="12" cy="12" r="8" stroke="#00e5ff" stroke-width="2.6"/>') },
-    { id: 'qNm', label: 'Cercles NM', svg: S('<circle cx="12" cy="12" r="3" stroke="#fff"/><circle cx="12" cy="12" r="6" stroke="#fff" stroke-dasharray="2 2"/><circle cx="12" cy="12" r="9.5" stroke="#fff"/>') }];
+    { id: 'qNm', label: 'Cercles NM', svg: S('<circle cx="12" cy="12" r="3" stroke="#fff"/><circle cx="12" cy="12" r="6" stroke="#fff" stroke-dasharray="2 2"/><circle cx="12" cy="12" r="9.5" stroke="#fff"/>') },
+    { id: 'qHi', label: 'Ouverture haute des derniers', svg: S('<path d="M3 12h8" stroke="#fff" stroke-width="2.4"/><path d="M12 12h7" stroke="#fff" stroke-dasharray="2 2"/><path d="M20 8v8" stroke="#fff" stroke-width="2.4"/>') }];
   const items = DEFS.filter(d => $(d.id)); if (!items.length) return;
   const first = $(items[0].id), btn = document.createElement('button'); btn.id = 'qShowMenu'; btn.title = 'Choisir ce qui est affiché sur la carte'; btn.textContent = 'Affichage';
   const anchor = $('qRec') || first; /* Setup PSV : après les réglages des portes, à la place de « Snap » (ordre des boutons : conditions, réglages, affichages, mesure) */
