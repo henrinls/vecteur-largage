@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.27.0';
+const VERSION = '0.27.1';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -516,7 +516,8 @@ function highEnd(s, prof, rec) {
   const t1 = e1.x * u.x + e1.y * u.y, t2 = e2.x * u.x + e2.y * u.y, ta = a.x * u.x + a.y * u.y, d = t2 - t1;
   if (Math.abs(d) < 1) return { end: s.end, d: 0 };
   const t = Math.max(ta, t2); /* jamais avant le vert */
-  return { end: Geo.fromLocal(s.prv, { x: e1.x + (t - t1) * u.x, y: e1.y + (t - t1) * u.y }), d: t - t1, H };
+  const sp = s.exits && s.exits.s, n = sp ? Math.floor((s.length + t - t1) / sp + 1e-6) + 1 : null; /* v0.27.1 (Henri) : nombre total de sorties, même intervalle (secondes) entre chaque */
+  return { end: Geo.fromLocal(s.prv, { x: e1.x + (t - t1) * u.x, y: e1.y + (t - t1) * u.y }), d: t - t1, H, n };
 }
 function compute() {
   wxRec = wxCached(current.id, current.when.slice(0, 10));
@@ -580,6 +581,11 @@ function hiTick(toPx, fromPx, half) { /* extrémités du trait perpendiculaire a
   if (!ax) { const q = toPx(Geo.fromLocal(sol.start, { x: sol.u.x * 1000, y: sol.u.y * 1000 })), m = Math.hypot(q.x - A.x, q.y - A.y) || 1; ax = { x: (q.x - A.x) / m, y: (q.y - A.y) / m }; }
   return [{ x: E.x - ax.y * half, y: E.y + ax.x * half }, { x: E.x + ax.y * half, y: E.y - ax.x * half }].map(fromPx);
 }
+function hiSide(toPx) { /* côté du texte : perpendiculaire au vecteur, à l'opposé de la ZMT (centre de DZ, sinon PRV) */
+  const E = toPx(sol.hi.end), A = toPx(sol.start), B = toPx(sol.end), l = Math.hypot(B.x - A.x, B.y - A.y) || 1; let n = { x: -(B.y - A.y) / l, y: (B.x - A.x) / l };
+  const Z = toPx(current.dz || sol.prv); if ((Z.x - E.x) * n.x + (Z.y - E.y) * n.y > 0) n = { x: -n.x, y: -n.y }; return { E, n };
+}
+const hiText = h => h.n ? `${h.n} sortie${h.n > 1 ? 's' : ''}` : '';
 function drawHighEnd() {
   const h = sol && sol.ok && sol.hi; if (!h || !h.d) return;
   const px = ll => map.latLngToContainerPoint(LL(ll)), ll = q => { const r = map.containerPointToLatLng([q.x, q.y]); return [r.lat, r.lng]; };
@@ -593,6 +599,12 @@ function drawHighEnd() {
     L.polyline(tk, { color: '#000', weight: 5.5, opacity: .6, interactive: false }).addTo(fig);
     L.polyline(tk, { color: C_END, weight: 3, interactive: false }).addTo(fig);
   }
+  /* v0.27.1 (Henri) : nombre total de sorties si les derniers ouvrent à cette hauteur, écrit à côté du trait, en petit, sans cartouche
+     (même format que « ouverture OSO » de trace-isv) : noir si le vecteur s'allonge, rouge s'il raccourcit */
+  const txt = hiText(h); if (!txt) return;
+  const sd = hiSide(px), P = { x: sd.E.x + sd.n.x * 14, y: sd.E.y + sd.n.y * 14 }, r = map.containerPointToLatLng([P.x, P.y]);
+  const tr = `translate(${sd.n.x >= 0 ? '0' : '-100%'},${sd.n.y > 0.7 ? '0' : sd.n.y < -0.7 ? '-100%' : '-50%'})`;
+  L.marker(r, { interactive: false, icon: L.divIcon({ className: 'hilab', iconSize: [0, 0], html: `<b class="${h.d > 0 ? 'onlight' : ''}" style="color:${h.d > 0 ? '#000' : C_END};transform:${tr}">${txt}</b>` }) }).addTo(fig);
 }
 function syncRotHandles() {
   const ok = sol && sol.ok && current.show.vec !== false;
@@ -891,7 +903,7 @@ function freeRects() {
 }
 // Étiquettes (degrés, chiffres, hauteurs…) : leur débord en pixels au-delà de la figure est réservé en plus,
 // sinon le cadrage serré les cache sous les boutons (« 180° » devenu « 80° », 20 nov. 2026)
-const FIT_LABELS = '.glabel span, .vlabel';
+const FIT_LABELS = '.glabel span, .vlabel, .hilab b'; /* v0.27.1 : le nombre de sorties de l'ouverture haute aussi */
 function labelOverhang(x0, x1, y0, y1) {
   const o = { l: 0, r: 0, t: 0, b: 0 }; if (!FIT_LABELS) return o;
   const c = map.getContainer().getBoundingClientRect();
@@ -1748,7 +1760,10 @@ async function renderPdfCanvas() {
       const E = toC(h.end), A0 = toC(sol.start), B0 = toC(sol.end), l = Math.hypot(B0.x - A0.x, B0.y - A0.y) || 1, ax = { x: (B0.x - A0.x) / l, y: (B0.y - A0.y) / l }, hf = 9 * u;
       const T1 = { x: E.x - ax.y * hf, y: E.y + ax.x * hf }, T2 = { x: E.x + ax.y * hf, y: E.y - ax.x * hf }, seg = (P, Q, col, w, dash) => { g.save(); g.lineCap = 'butt'; g.strokeStyle = col; g.lineWidth = w; g.setLineDash(dash || []); g.beginPath(); g.moveTo(P.x, P.y); g.lineTo(Q.x, Q.y); g.stroke(); g.restore(); };
       if (h.d > 0) { seg(B0, E, 'rgba(255,255,255,.55)', 4.5 * u, [7 * u, 6 * u]); seg(B0, E, '#000', 2.5 * u, [7 * u, 6 * u]); seg(T1, T2, 'rgba(255,255,255,.7)', 5.5 * u); seg(T1, T2, '#000', 3 * u); }
-      else { seg(T1, T2, 'rgba(0,0,0,.6)', 5.5 * u); seg(T1, T2, C_END, 3 * u); } } }
+      else { seg(T1, T2, 'rgba(0,0,0,.6)', 5.5 * u); seg(T1, T2, C_END, 3 * u); }
+      const txt = hiText(h); if (txt) { const sd = hiSide(toC), P = { x: sd.E.x + sd.n.x * 14 * u, y: sd.E.y + sd.n.y * 14 * u }; g.save(); g.font = `bold ${11 * u}px sans-serif`;
+        g.textAlign = sd.n.x >= 0 ? 'left' : 'right'; g.textBaseline = sd.n.y > 0.7 ? 'top' : sd.n.y < -0.7 ? 'bottom' : 'middle'; g.lineJoin = 'round';
+        g.lineWidth = 3 * u; g.strokeStyle = h.d > 0 ? 'rgba(255,255,255,.9)' : 'rgba(0,0,0,.85)'; g.strokeText(txt, P.x, P.y); g.fillStyle = h.d > 0 ? '#000' : C_END; g.fillText(txt, P.x, P.y); g.restore(); } } }
     dot(sol.start, C_START, 9); dot(sol.end, C_END, 9); // même taille que les PRV, comme à l'écran
     { const bw = sol.windRel && barbWind(toC, sol.windRel, sol.start); if (bw) { const p = greenBarbPos(toC, 24 * u), bg = barbAt(bw, u, p.c.x, p.c.y); g.save(); g.lineCap = 'round'; /* v0.25.7 : vent de largage à côté du vert */
       const st = (col, w) => { g.strokeStyle = col; g.lineWidth = w; bg.lines.forEach(([p0, q]) => { g.beginPath(); g.moveTo(p0.x, p0.y); g.lineTo(q.x, q.y); g.stroke(); }); if (bg.calm) { g.beginPath(); g.arc(bg.T.x, bg.T.y, 2.5 * u, 0, 2 * Math.PI); g.stroke(); } };

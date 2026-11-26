@@ -223,3 +223,5 @@ button,input,select,label,a{touch-action:manipulation}
 /* écran étroit (téléphone) : ⚙ seul, pour que ↶ ↷ tiennent à côté sans pousser les boutons ronds hors de l'écran */
 @media (max-width:440px){#top .parRow .plab{display:none}}
 #top .round{flex-shrink:0}
+/* v0.27.1 : nombre de sorties à côté du trait d'ouverture haute des derniers (même format que « ouverture OSO » de trace-isv) */
+.hilab{pointer-events:none}.hilab b{position:absolute;left:0;top:0;white-space:nowrap;font-size:11px;font-weight:700;text-shadow:0 0 3px #000,0 0 3px #000,0 0 2px #000}.hilab b.onlight{text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 2px #fff,0 0 1px #fff}
