@@ -117,7 +117,7 @@ button.danger{border-color:#a33;color:#ff8a8a}
 /* ---------- vecteur-largage ---------- */
 .prv{-webkit-touch-callout:none;user-select:none}
 .prv span{position:absolute;left:5px;top:5px;width:14px;height:14px;border-radius:50%;background:#ffd400;border:2px solid #111;opacity:.5}
-.prv.used span{background:#ff8c00;opacity:1;box-shadow:0 0 0 1.5px #fff}
+.prv.used span{background:#ffd400;opacity:1} /* v0.24.2 (Henri) : PRV utilisé = point jaune plein comme le PTU de trace-isv ; les autres jaunes transparents */
 .vlabel{-webkit-touch-callout:none;user-select:none}
 .vlabel span{position:absolute;transform:translate(-50%,-50%);white-space:nowrap;background:rgba(0,0,0,.82);color:#fff;font-weight:800;font-size:13px;padding:3px 8px;border-radius:7px;border:1.5px solid #fff}
 .vlabel .vcap{color:#ffd400}
@@ -175,10 +175,10 @@ button,input,select,label,a{touch-action:manipulation}
 
 /* Centre de la DZ (verticale terrain) : cercle blanc à croix, fin */
 .dzc{-webkit-touch-callout:none;user-select:none}
-.dzc span{position:absolute;left:8px;top:8px;width:14px;height:14px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px #000,inset 0 0 0 1px #000}
-.dzc span::before,.dzc span::after{content:'';position:absolute;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.6)}
-.dzc span::before{left:50%;top:-8px;bottom:-8px;width:2px;transform:translateX(-50%)}
-.dzc span::after{top:50%;left:-8px;right:-8px;height:2px;transform:translateY(-50%)}
+.dzc span{position:absolute;left:3px;top:3px;width:24px;height:24px;box-sizing:border-box;border-radius:50%;border:3px solid #ff8c00;box-shadow:0 0 0 1.5px #000,inset 0 0 0 1.5px #000} /* v0.24.2 (Henri) : cible orange comme la ZMT de trace-isv */
+.dzc span::before,.dzc span::after{content:'';position:absolute;background:#ff8c00;box-shadow:0 0 0 1px #000}
+.dzc span::before{left:50%;top:-7px;bottom:-7px;width:2px;transform:translateX(-50%)}
+.dzc span::after{top:50%;left:-7px;right:-7px;height:2px;transform:translateY(-50%)}
 .vlabel .vdz{font-style:normal;font-weight:600;font-size:12px;color:#cfe8ff}
 
 /* Cercles NM autour de la DZ */
