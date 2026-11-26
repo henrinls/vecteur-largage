@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>vecteur-largage</title>
 <link rel="stylesheet" href="vendor/leaflet.css">
-<link rel="stylesheet" href="style.css?v=0.24.4">
+<link rel="stylesheet" href="style.css?v=0.25.0">
 </head>
 <body>
 <div id="map"></div>
@@ -107,13 +107,16 @@
     <button id="btnDzDel" class="wide hidden">✕ Supprimer le centre de la DZ</button>
     <p class="hint">Sert à annoncer où est le point vert par rapport à la verticale du terrain : nautiques avant (le long de l'axe) et décalage de l'axe (au point cardinal près). Appui long sur le centre pour le déplacer.</p>
 
-    <h3>Axe imposé par la zone</h3>
-    <label class="check"><input type="checkbox" id="z_axisOn"> Axe de largage imposé</label>
+    <h3 id="capSec">Cap de largage</h3>
+    <label class="check"><input type="checkbox" id="z_axisOn"> Axe de largage imposé par la zone</label>
     <div id="axisRow">
       <div class="grid2"><div><label>Cap (° magnétiques)</label><input id="z_axisMag" inputmode="numeric"></div><div></div></div>
       <label class="check"><input type="checkbox" id="z_axisBoth"> Dans les deux sens (l'appli prend le plus face au vent)</label>
     </div>
-    <p class="hint">Sans axe imposé, le vecteur est face au vent de largage. Appui long sur le cap écrit sur le vecteur pour le changer à la main.</p>
+    <label>Cap à la main (° magnétiques)</label>
+    <div class="stepper"><button data-cap="-5">−5</button><button data-cap="-1">−1</button><input id="z_cap" inputmode="numeric"><button data-cap="1">+1</button><button data-cap="5">+5</button><button id="z_capAuto">Auto</button></div>
+    <p class="hint" id="capHint"></p>
+    <p class="hint">Sans axe imposé, le vecteur est face au vent de largage. Le cap à la main passe avant tout ; on peut aussi tourner le vecteur sur la carte : appui long sur le vert ou le rouge, puis glisser. « Auto » revient au cap automatique.</p>
     <p class="hint" id="axisInfo"></p>
 
     <h3>Altitude du terrain</h3>
@@ -241,16 +244,16 @@
 
 <div id="toast" class="hidden"></div>
 
-<script src="vendor/leaflet.js?v=0.24.4"></script>
-<script src="vendor/leaflet-rotate.js?v=0.24.4"></script>
-<script src="geo.js?v=0.24.4"></script>
-<script src="clubs.js?v=0.24.4"></script>
-<script src="wmm.js?v=0.24.4"></script>
-<script src="windpick.js?v=0.24.4"></script>
-<script src="pdfview.js?v=0.24.4"></script>
-<script src="lpmove.js?v=0.24.4"></script>
-<script src="app.js?v=0.24.4"></script>
-<script src="showmenu.js?v=0.24.4"></script>
-<script src="photo.js?v=0.24.4"></script>
+<script src="vendor/leaflet.js?v=0.25.0"></script>
+<script src="vendor/leaflet-rotate.js?v=0.25.0"></script>
+<script src="geo.js?v=0.25.0"></script>
+<script src="clubs.js?v=0.25.0"></script>
+<script src="wmm.js?v=0.25.0"></script>
+<script src="windpick.js?v=0.25.0"></script>
+<script src="pdfview.js?v=0.25.0"></script>
+<script src="lpmove.js?v=0.25.0"></script>
+<script src="app.js?v=0.25.0"></script>
+<script src="showmenu.js?v=0.25.0"></script>
+<script src="photo.js?v=0.25.0"></script>
 </body>
 </html>

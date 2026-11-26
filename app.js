@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.24.4';
+const VERSION = '0.25.0';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -542,7 +542,30 @@ function draw(light) {
     L.marker(a, { interactive: false, zIndexOffset: 600, icon: dotIcon(C_START, 14, '') }).addTo(fig);
     L.marker(b, { interactive: false, zIndexOffset: 600, icon: dotIcon(C_END, 14, '') }).addTo(fig);
   }
+  syncRotHandles();
   placeMarkers();
+}
+/* v0.25.0 (Henri, comme trace-isv) : appui long sur le vert ou le rouge puis glisser = faire TOURNER le vecteur autour de son milieu.
+   Poignées persistantes (jamais recréées pendant le geste, sinon le téléphone perd le doigt) ; le cap ainsi donné est un cap « à la main »
+   (headingOverride, vrai), le sens inversé et le décalage manuel sont remis à zéro ; la longueur et la place sont recalculées. */
+const rotIcon = L.divIcon({ className: 'vrot', iconSize: [40, 40], iconAnchor: [20, 20], html: '<span></span>' });
+let rotH = { g: null, r: null }, rotPivot = null;
+function rotTo(which, ll) {
+  if (!rotPivot) return; const v = Geo.toLocal(rotPivot, ll); if (Math.hypot(v.x, v.y) < 1) return;
+  let h = Math.atan2(v.x, v.y) * 180 / Math.PI; if (which === 'g') h += 180;
+  current.headingOverride = n360(h); current.reversed = false; current.offsetManual = null; draw(true);
+}
+function syncRotHandles() {
+  const ok = sol && sol.ok && current.show.vec !== false;
+  ['g', 'r'].forEach(k => {
+    const p = ok ? (k === 'g' ? sol.start : sol.end) : null;
+    if (!p) { if (rotH[k]) { map.removeLayer(rotH[k]); rotH[k] = null; } return; }
+    if (!rotH[k]) {
+      const m = rotH[k] = L.marker(LL(p), { icon: rotIcon, zIndexOffset: 750 }).addTo(map);
+      longPressDrag(m, ll => rotTo(k, ll), () => { rotPivot = null; persist(); redraw(); fillInputs(); toast('Cap de largage choisi à la main. « Auto » (cadre du cap › Cap de largage) pour revenir en automatique.'); },
+        () => { rotPivot = { lat: (sol.start.lat + sol.end.lat) / 2, lng: (sol.start.lng + sol.end.lng) / 2 }; });
+    } else if (!rotH[k]._lpDragging) rotH[k].setLatLng(LL(p));
+  });
 }
 
 // Rosace graduée en degrés MAGNÉTIQUES autour du vecteur (pour le largueur)
@@ -721,6 +744,18 @@ async function prvMenu(id) {
   }
   if (res === true && !used) { current.prvManual = id; current.offsetManual = null; persist(); redraw(); toast('PRV choisi à la main. « PRV auto » pour revenir au choix automatique.'); }
 }
+// Cap à la main (onglet Zones › Cap de largage) : champ + boutons −5 −1 +1 +5 et Auto (v0.25.0)
+function capMagNow() { return sol && sol.ok ? n360(sol.heading - sol.decl) : null; }
+function setCapMag(v) { if (!sol || !sol.ok || isNaN(v)) return; current.headingOverride = n360(v + sol.decl); current.reversed = false; current.offsetManual = null; persist(); redraw(); }
+function syncCapField() {
+  const el = $('z_cap'); if (!el) return; const m = capMagNow(), man = typeof current.headingOverride === 'number';
+  if (document.activeElement !== el) el.value = man && m != null ? Math.round(m) : '';
+  el.placeholder = m != null ? String(Math.round(m)) : '';
+  $('capHint').textContent = m == null ? '' : man ? `Cap choisi à la main : ${Math.round(m)}° M.` : `Cap automatique (${sol.why}) : ${Math.round(m)}° M. Le modifier ici le fixe à la main.`;
+}
+document.querySelectorAll('[data-cap]').forEach(b => b.addEventListener('click', () => { const m = capMagNow(); if (m == null) return; setCapMag(Math.round(m) + +b.dataset.cap); }));
+$('z_cap').addEventListener('change', e => { const t = e.target.value.trim(); if (t === '') { current.headingOverride = null; current.reversed = false; current.offsetManual = null; persist(); redraw(); return; } setCapMag(parseFloat(t.replace(',', '.'))); });
+$('z_capAuto').addEventListener('click', () => { current.headingOverride = null; current.reversed = false; current.offsetManual = null; persist(); redraw(); toast('Cap de largage automatique'); });
 async function editHeading() {
   if (!sol || !sol.ok) return;
   const res = await ask(`Cap de largage (° magnétiques). Vide = automatique (${sol.why}).`, typeof current.headingOverride === 'number' ? String(Math.round(n360(sol.heading - sol.decl - (current.reversed ? 180 : 0)))) : '');
@@ -882,6 +917,7 @@ function fillInputs(only) {
   if (document.activeElement !== $('p_vh')) $('p_vh').value = fmt1((+p.vz) * (+p.glide));
   if (document.activeElement !== $('p_vz')) $('p_vz').value = fmt1(+p.vz);
   $('glideInfo').textContent = `Finesse ${fmt1(+p.glide)}`;
+  syncCapField();
   if (only) return;
   $('z_axisOn').checked = !!current.axis.on; $('z_axisBoth').checked = current.axis.both !== false;
   if (document.activeElement !== $('z_axisMag')) $('z_axisMag').value = current.axis.on ? Math.round(current.axis.mag) : (current.axis.mag || '');
@@ -1839,4 +1875,5 @@ $('qZero').addEventListener('click', () => { zeroWind = !zeroWind; store.set('vl
     });
   }, { capture: true, passive: false });
 })();
-$('capInfo').addEventListener('click', () => editHeading());
+/* v0.25.0 (Henri) : le cadre du cap en haut ouvre l'onglet Zones au chapitre « Cap de largage » (axe imposé, puis cap à la main) */
+$('capInfo').addEventListener('click', () => { openSheet('zones'); setTimeout(() => { const s = $('capSec'), sh = $('sheet'), tb = sh.querySelector('.tabs'); if (!s) return; sh.scrollTop += s.getBoundingClientRect().top - sh.getBoundingClientRect().top - (tb ? tb.offsetHeight + 30 : 80); }, 60); /* titre juste sous les onglets (titres et onglets collants) */ });
