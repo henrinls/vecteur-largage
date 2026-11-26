@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>vecteur-largage</title>
 <link rel="stylesheet" href="vendor/leaflet.css">
-<link rel="stylesheet" href="style.css?v=0.25.2">
+<link rel="stylesheet" href="style.css?v=0.25.3">
 </head>
 <body>
 <div id="map"></div>
@@ -35,13 +35,16 @@
 </header>
 
 <div id="banner" class="hidden"></div>
+<div id="vecPop" class="hidden"><!-- v0.25.3 (Henri, comme trace-isv) : bouton Vecteur → deux sous-boutons -->
+  <button id="qVecAuto" title="Revenir au vecteur automatique (cap, sens et place calculés)">Vect. auto</button>
+  <button id="qRev" title="Inverser le sens de l'axe">⇅ Sens</button>
+</div>
 
 <nav id="quick">
   <button id="qWhen" title="Date, heure, hauteur de largage et d'ouverture du saut"></button>
   <button id="qWinds" title="Tableau des vents">🌬</button>
-  <button id="qRev" title="Inverser le sens de l'axe">⇅ Sens</button>
+  <button id="qVec" title="Vecteur : automatique, ou inverser le sens">Vecteur</button>
   <button id="qPrv" title="PRV automatique ou choisi à la main">PRV auto</button>
-  <button id="qVecAuto" class="hidden" title="Revenir au vecteur automatique (cap, sens et place calculés)">Vect. auto</button>
   <button id="qTicks" title="Rosace en degrés magnétiques autour du vecteur">0°</button>
   <button id="qRelax" title="Afficher / masquer la zone de relaxation">Relax</button>
   <button id="qLabel" title="Afficher / masquer les infos du vecteur (cap, longueur, sorties)">Infos</button>
@@ -114,7 +117,7 @@
       <label class="check"><input type="checkbox" id="z_axisBoth"> Dans les deux sens (l'appli prend le plus face au vent)</label>
     </div>
     <label>Cap à la main (° magnétiques)</label>
-    <div class="stepper"><button data-cap="-5">−5</button><button data-cap="-1">−1</button><input id="z_cap" inputmode="numeric"><button data-cap="1">+1</button><button data-cap="5">+5</button><button id="z_capAuto">Auto</button></div>
+    <div class="stepper"><button data-cap="-5">−5</button><button data-cap="-1">−1</button><input id="z_cap" inputmode="numeric"><button data-cap="1">+1</button><button data-cap="5">+5</button><button id="z_capAuto">Auto</button><button id="z_capRev" title="Inverser le sens">⇅</button></div>
     <p class="hint" id="capHint"></p>
     <p class="hint">Sans axe imposé, le vecteur est face au vent de largage. Le cap à la main passe avant tout ; on peut aussi tourner le vecteur sur la carte : appui long sur le vert ou le rouge, puis glisser. « Auto » revient au cap automatique.</p>
     <p class="hint" id="axisInfo"></p>
@@ -244,16 +247,16 @@
 
 <div id="toast" class="hidden"></div>
 
-<script src="vendor/leaflet.js?v=0.25.2"></script>
-<script src="vendor/leaflet-rotate.js?v=0.25.2"></script>
-<script src="geo.js?v=0.25.2"></script>
-<script src="clubs.js?v=0.25.2"></script>
-<script src="wmm.js?v=0.25.2"></script>
-<script src="windpick.js?v=0.25.2"></script>
-<script src="pdfview.js?v=0.25.2"></script>
-<script src="lpmove.js?v=0.25.2"></script>
-<script src="app.js?v=0.25.2"></script>
-<script src="showmenu.js?v=0.25.2"></script>
-<script src="photo.js?v=0.25.2"></script>
+<script src="vendor/leaflet.js?v=0.25.3"></script>
+<script src="vendor/leaflet-rotate.js?v=0.25.3"></script>
+<script src="geo.js?v=0.25.3"></script>
+<script src="clubs.js?v=0.25.3"></script>
+<script src="wmm.js?v=0.25.3"></script>
+<script src="windpick.js?v=0.25.3"></script>
+<script src="pdfview.js?v=0.25.3"></script>
+<script src="lpmove.js?v=0.25.3"></script>
+<script src="app.js?v=0.25.3"></script>
+<script src="showmenu.js?v=0.25.3"></script>
+<script src="photo.js?v=0.25.3"></script>
 </body>
 </html>

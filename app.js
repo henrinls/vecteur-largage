@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.25.2';
+const VERSION = '0.25.3';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -970,7 +970,7 @@ function syncQuick() {
   $('qRelax').classList.toggle('on', !!current.show.relax); $('qLabel').classList.toggle('on', current.show.label !== false); $('qNm').classList.toggle('on', !!current.show.nm); $('qTicks').classList.toggle('on', !!current.show.rose);
   $('qRev').classList.toggle('on', !!current.reversed);
   $('qPrv').textContent = 'PRV auto'; $('qPrv').classList.toggle('hidden', !current.prvManual); // n'apparaît qu'après un choix manuel
-  $('qVecAuto').classList.toggle('hidden', !vecManual()); /* v0.25.2 (Henri, comme trace-isv) : visible dès que le vecteur est à la main (place, cap, sens) */
+  $('qVecAuto').disabled = !vecManual(); /* v0.25.3 : dans le sous-menu du bouton Vecteur, grisé quand rien n'est à la main */ $('qVec').classList.toggle('on', !!vecPopOpen);
   $('qWinds').classList.toggle('on', !$('windsBox').classList.contains('hidden'));
 }
 function quick(fn, msg) { fn(); syncQuick(); persist(); redraw(); if (msg) toast(msg()); }
@@ -978,9 +978,18 @@ $('qLabel').addEventListener('click', () => quick(() => { current.show.label = c
 $('qNm').addEventListener('click', () => { if (!current.dz) return toast('Place d\'abord le centre de la DZ (☰ Zones)'); quick(() => { current.show.nm = !current.show.nm; }, () => current.show.nm ? 'Cercles tous les 0,1 NM autour de la DZ' : 'Cercles NM masqués'); });
 $('qTicks').addEventListener('click', () => quick(() => { current.show.rose = !current.show.rose; }, () => current.show.rose ? 'Rosace en degrés magnétiques autour du vecteur' : 'Rosace masquée'));
 $('qRelax').addEventListener('click', () => quick(() => { current.show.relax = !current.show.relax; }, () => current.show.relax ? 'Zone de relaxation affichée' : 'Zone de relaxation masquée'));
+/* v0.25.3 (Henri, comme trace-isv) : bouton Vecteur → « Vect. auto » et « ⇅ Sens » à droite du bouton ; ⇅ aussi à côté du cap à la main */
+var vecPopOpen = false;
+function syncVecPop() { const p = $('vecPop'); p.classList.toggle('hidden', !vecPopOpen); $('qVec').classList.toggle('on', vecPopOpen); if (!vecPopOpen) return;
+  const r = $('qVec').getBoundingClientRect(); p.style.left = `${Math.round(r.right + 6)}px`; p.style.top = `${Math.round(r.top + r.height / 2 - 25)}px`; }
+function closeVecPop() { if (vecPopOpen) { vecPopOpen = false; syncVecPop(); } }
+$('qVec').addEventListener('click', () => { vecPopOpen = !vecPopOpen; syncQuick(); syncVecPop(); });
+document.addEventListener('pointerdown', e => { if (vecPopOpen && !$('vecPop').contains(e.target) && e.target !== $('qVec')) closeVecPop(); }, true);
+['qVecAuto', 'qRev'].forEach(id => $(id).addEventListener('click', () => setTimeout(closeVecPop, 0)));
+$('z_capRev').addEventListener('click', () => $('qRev').click());
 $('qRev').addEventListener('click', () => quick(() => { current.reversed = !current.reversed; current.offsetManual = null; },
   () => current.reversed ? (current.axis.on && !current.axis.both ? '⚠️ Sens inversé : la zone n\'autorise pas cet axe dans ce sens' : 'Sens de l\'axe inversé') : 'Sens normal'));
-$('qPrv').addEventListener('click', () => { if (!current.prvManual) return toast('PRV automatique (le plus au vent). Appui long sur un PRV pour le choisir à la main.'); quick(() => { current.prvManual = null; current.offsetManual = null; }, () => 'PRV automatique (le plus au vent)'); });
+$('qPrv').addEventListener('click', () => { if (!current.prvManual) return toast('PRV automatique (le plus au vent). Touche un autre PRV pour le choisir à la main.'); quick(() => { current.prvManual = null; current.offsetManual = null; }, () => 'PRV automatique (le plus au vent)'); });
 function vecManual() { return typeof current.offsetManual === 'number' || typeof current.headingOverride === 'number' || !!current.reversed || current.tManual != null; }
 /* « Vect. auto » : tout ce qui a été réglé à la main sur le vecteur revient en automatique (place, cap, sens) ; le PRV garde son propre bouton « PRV auto » et l'axe imposé par la zone reste */
 $('qVecAuto').addEventListener('click', () => quick(() => { current.offsetManual = null; current.tManual = null; current.headingOverride = null; current.reversed = false; }, () => 'Vecteur automatique : cap et place recalculés'));

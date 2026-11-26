@@ -207,6 +207,9 @@ button,input,select,label,a{touch-action:manipulation}
 #quick #qShowMenu{border-color:#00e5ff;color:#fff;font-size:12px}#quick #qShowMenu.on{background:#00e5ff;color:#111}#quick #qShowMenu.part:not(.on){border-style:dashed}
 #showPop{position:fixed;z-index:1999;display:flex;flex-direction:column;gap:5px;max-height:calc(100% - 16px);overflow-y:auto;padding:6px;border-radius:12px;background:rgba(20,20,20,.92);border:1px solid #666}
 #showPop.hidden{display:none}
+#vecPop{position:fixed;z-index:1500;display:flex;flex-direction:column;gap:6px}#vecPop.hidden{display:none}
+#vecPop button{min-width:96px;height:44px;padding:0 10px;border-radius:11px;background:rgba(20,20,20,.92);border:2px solid #fff;color:#fff;font-weight:700;white-space:nowrap;touch-action:manipulation}
+#vecPop button:disabled{opacity:.4}
 #showPop .sph{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 0 0 6px;color:#fff;font-size:13px}
 #showPop button{display:flex;align-items:center;gap:8px;min-height:36px;padding:0 10px 0 6px;border-radius:9px;background:#2a2a2a;border:2px solid #555;color:#999;font-size:13px;font-weight:600;text-align:left;white-space:nowrap;touch-action:manipulation}
 #showPop button.spx{min-height:34px;min-width:44px;justify-content:center;padding:0;background:#3a3a3a;border-color:#888;color:#fff;font-size:16px;font-weight:700}
