@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.24.2';
+const VERSION = '0.24.3';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -647,7 +647,7 @@ function placeMarkers() {
   Object.keys(prvMarkers).forEach(id => { if (!current.prvs.find(p => p.id === id)) { map.removeLayer(prvMarkers[id]); delete prvMarkers[id]; } });
   current.prvs.forEach(p => {
     let m = prvMarkers[p.id];
-    if (!m) { m = prvMarkers[p.id] = L.marker(LL(p), { icon: prvIcon(p.id === usedId), zIndexOffset: 800 }).addTo(map); m._used = p.id === usedId; longPressAction(m, () => prvMenu(p.id)); }
+    if (!m) { m = prvMarkers[p.id] = L.marker(LL(p), { icon: prvIcon(p.id === usedId), zIndexOffset: 800 }).addTo(map); m._used = p.id === usedId; longPressAction(m, () => prvMenu(p.id)); m.on('click', ev => { L.DomEvent.stop(ev); prvTap(p.id); }); }
     else { m.setLatLng(LL(p)); if (m._used !== (p.id === usedId)) { m.setIcon(prvIcon(p.id === usedId)); m._used = p.id === usedId; longPressAction(m, () => prvMenu(p.id)); } }
   });
   // Trait du vecteur : appui long puis glisser = déplacer (longueur recalculée, même axe)
@@ -702,6 +702,13 @@ function setManualPoint(ll) {
   if (!sol || !sol.ok) return;
   const q = Geo.toLocal(sol.prv, ll);
   current.offsetManual = q.x * sol.r.x + q.y * sol.r.y; current.tManual = q.x * sol.u.x + q.y * sol.u.y;
+}
+/* v0.24.3 (Henri) : un appui court sur un PRV non actif le rend actif (choisi à la main) ; sur le PRV actif, rien (appui long = menu) */
+function prvTap(id) {
+  if (Date.now() < suppressClickUntil) return; /* fin d'un appui long */
+  if (sol && sol.prv && sol.prv.id === id) return;
+  if (!current.prvs.find(x => x.id === id)) return;
+  current.prvManual = id; current.offsetManual = null; persist(); redraw(); toast('PRV choisi à la main. « PRV auto » pour revenir au choix automatique.');
 }
 async function prvMenu(id) {
   const p = current.prvs.find(x => x.id === id); if (!p) return;
