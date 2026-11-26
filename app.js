@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.27.3';
+const VERSION = '0.28.0';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -543,8 +543,8 @@ function draw(light) {
   compute();
   if (current.show.nm && current.dz) nmRings();
   updateInfo(); syncQuick(); syncPlaceBtn(); syncJump(); fillInputs(true); capInfo();
-  if (placing) placeBanner();
-  else if (!current.prvs.length) setBanner(current.id ? 'Place les points de rendez-vous : ☰ Zones → PRV → Toucher la carte.' : 'Pour commencer : ☰ → ＋ Nouvelle zone.');
+  if (placing || wiz) placeBanner();
+  else if (!current.prvs.length) { if (current.id) wizResumeBanner(); else setBanner('Pour commencer : ☰ → ＋ Nouvelle zone.'); }
   else if (!sol.ok) setBanner(sol.err);
   else setBanner(zeroWind ? 'TEST : vent forcé à 0 partout (bouton « Vent 0 » pour revenir aux prévisions)' : (sol.warn || null));
   if (sol.ok) {
@@ -564,6 +564,7 @@ function draw(light) {
   }
   syncRotHandles(); drawGreenBarb();
   placeMarkers();
+  if (!light && wizFit && sol.ok) { wizFit = false; setTimeout(fitFigure, 50); } // fin de la mise en place guidée : zoom optimisé
 }
 /* v0.25.0 (Henri, comme trace-isv) : appui long sur le vert ou le rouge puis glisser = faire TOURNER le vecteur autour de son milieu.
    Poignées persistantes (jamais recréées pendant le geste, sinon le téléphone perd le doigt) ; le cap ainsi donné est un cap « à la main »
@@ -860,7 +861,7 @@ function addPrv(p) {
   current.prvs.push({ id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), lat: p.lat, lng: p.lng });
   persist(); redraw();
   toast(`PRV placé (${current.prvs.length}). Appui long sur un PRV : l'utiliser comme référence ou le supprimer.`);
-  ensureWx(false);
+  ensureWx(false); if (wiz === 'P') wizGo('P'); // mise en place guidée : « PRV n° 2 ? »
 }
 
 // Points à faire tenir à l'écran (et dans le PDF) : vecteur, PRV, zone de relaxation affichée
@@ -991,7 +992,7 @@ function addPlaceCancel() {
   c.onclick = e => { e.stopPropagation(); cancelPlacing(); toast('Placement annulé'); };
   b.classList.add('hasx'); b.append(c);
 }
-function cancelPlacing() { placing = null; placeBanner(); syncPlaceBtn(); redraw(); }
+function cancelPlacing() { placing = null; wiz = null; placeBanner(); syncPlaceBtn(); redraw(); }
 let toastT;
 function toast(t) { const el = $('toast'); el.textContent = t; el.classList.remove('hidden'); clearTimeout(toastT); toastT = setTimeout(() => el.classList.add('hidden'), 3200); }
 const numIn = el => parseFloat(String(el.value).replace(',', '.'));
@@ -1180,25 +1181,56 @@ $('t_hour').addEventListener('change', e => setTWhen(tWhen.slice(0, 11) + e.targ
 
 // ---------- Placement des PRV : en touchant la carte ----------
 function syncPlaceBtn() { $('btnPlaceP').classList.toggle('on', placing === 'P'); $('btnPlaceDZ').classList.toggle('on', placing === 'D'); }
-function placeBanner() { setBanner(placing === 'P' ? 'Touche la carte pour placer le point de rendez-vous.' : placing === 'D' ? 'Touche la carte pour placer le centre de la DZ (verticale terrain).' : null); }
-function setDz(p, how) { current.dz = { lat: p.lat, lng: p.lng }; persist(); fillInputs(); redraw(); toast(`Centre de la DZ placé ${how}. Appui long dessus pour le déplacer.`); }
-$('btnPlaceDZ').addEventListener('click', () => {
-  if (placing === 'D') { placing = null; placeBanner(); syncPlaceBtn(); return; }
-  if (!current.id) return toast('Crée d\'abord une zone (＋ Nouvelle zone)');
-  stopMeasure(); placing = 'D'; syncPlaceBtn(); placeBanner(); closeSheet();
-});
-$('btnDzGps').addEventListener('click', () => {
-  if (!current.id) return toast('Crée d\'abord une zone (＋ Nouvelle zone)');
+function placeBanner() { if (wiz) return wizBanner(); setBanner(placing === 'P' ? 'Touche la carte pour placer le point de rendez-vous.' : placing === 'D' ? 'Touche la carte pour placer le centre de la DZ (verticale terrain).' : null); }
+/* v0.28.0 (26 nov. 2026, Henri) : mise en place guidée d'une nouvelle zone, pas à pas dans le bandeau jaune :
+   1. centre de la DZ (toucher la carte ou 📡 Ma position), obligatoire ; 2. PRV, en boucle : « PRV n° 2 ? » → toucher la carte, ou « ✓ Non » (vert) ;
+   3. axe imposé par la zone, facultatif (cap ° mag, ou « ✓ Non ») ; 4. zoom optimisé sur la figure dès que le vecteur est calculé.
+   Le ✕ arrête ; une zone sans PRV propose « Reprendre la mise en place ». Piège : wiz survit à la mesure 📏 (placing mis de côté), pas à l'ouverture d'une zone. */
+let wiz = null, wizFit = false; // wiz : null | 'D' | 'P' | 'AX'
+function bannerBtns(btns) {
+  const b = $('banner'); if (b.classList.contains('hidden')) return;
+  const row = document.createElement('div'); row.className = 'bbtns';
+  btns.forEach(x => { if (x.input) { row.append(x.input); return; } const k = document.createElement('button'); k.textContent = x.t; if (x.ok) k.className = 'ok'; k.onclick = e => { e.stopPropagation(); x.fn(); }; row.append(k); });
+  b.insertBefore(row, b.querySelector('.bcancel'));
+}
+function addWizX() { const b = $('banner'); if (b.querySelector('.bcancel')) return; const c = document.createElement('button'); c.className = 'bcancel'; c.textContent = '✕'; c.title = 'Arrêter'; c.onclick = e => { e.stopPropagation(); cancelPlacing(); toast('Mise en place arrêtée'); }; b.classList.add('hasx'); b.append(c); }
+function wizBanner() {
+  if (meas.active) { setBanner(null); return; } // mesure 📏 en cours : elle a son propre cadre ; la mise en place reprend en la quittant
+  if (wiz === 'D') { setBanner('Touche la carte pour poser le centre de la DZ (verticale terrain).'); bannerBtns([{ t: '📡 Ma position', fn: dzGps }]); }
+  else if (wiz === 'P') { const n = current.prvs.length; setBanner(n ? `PRV n° ${n + 1} ? Touche la carte pour le poser.` : 'Touche la carte pour poser le point de rendez-vous.'); if (n) bannerBtns([{ t: '✓ Non', ok: true, fn: () => wizGo('AX') }]); }
+  else if (wiz === 'AX') {
+    setBanner('Axe de largage imposé par la zone ?');
+    const inp = document.createElement('input'); inp.className = 'bin'; inp.inputMode = 'numeric'; inp.placeholder = 'cap ° mag';
+    const ok = () => { const v = numIn(inp); if (isNaN(v)) return toast('Saisis le cap en degrés magnétiques, ou « ✓ Non »'); current.axis.mag = n360(v); current.axis.on = true; current.headingOverride = null; current.reversed = false; current.offsetManual = null; persist(); fillInputs(); toast(`Axe imposé : ${Math.round(current.axis.mag)}° mag${current.axis.both !== false ? ', dans les deux sens' : ''}`); wizGo(null); };
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') ok(); });
+    bannerBtns([{ input: inp }, { t: 'OK', fn: ok }, { t: '✓ Non', ok: true, fn: () => wizGo(null) }]);
+  } else { setBanner(null); return; }
+  addWizX();
+}
+function wizGo(step) {
+  wiz = step; placing = step === 'D' || step === 'P' ? step : null;
+  if (!step) { wizFit = true; setTimeout(() => { if (wizFit) { wizFit = false; if (figurePoints().length) fitFigure(); } }, 6000); } // zoom dès que le vecteur est calculé (6 s au plus)
+  syncPlaceBtn(); placeBanner(); redraw();
+}
+function wizResumeBanner() { setBanner('Il manque les points de rendez-vous.'); bannerBtns([{ t: '▶ Reprendre la mise en place', fn: () => { stopMeasure(); closeSheet(); wizGo(current.dz ? 'P' : 'D'); } }]); }
+function dzGps() {
   if (!navigator.geolocation) return toast('Géolocalisation indisponible');
-  $('btnDzGps').textContent = '🛰 Recherche…';
-  navigator.geolocation.getCurrentPosition(pos => { $('btnDzGps').textContent = '🛰 Ma position (GPS)'; setDz({ lat: pos.coords.latitude, lng: pos.coords.longitude }, 'à ta position'); },
+  $('btnDzGps').textContent = '🛰 Recherche…'; toast('Recherche de ta position…');
+  navigator.geolocation.getCurrentPosition(pos => { $('btnDzGps').textContent = '🛰 Ma position (GPS)'; if (placing === 'D') placing = null; setDz({ lat: pos.coords.latitude, lng: pos.coords.longitude }, 'à ta position'); },
     () => { $('btnDzGps').textContent = '🛰 Ma position (GPS)'; toast('Position refusée ou indisponible'); }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+}
+function setDz(p, how) { current.dz = { lat: p.lat, lng: p.lng }; persist(); fillInputs(); redraw(); toast(`Centre de la DZ placé ${how}. Appui long dessus pour le déplacer.`); if (wiz === 'D') wizGo('P'); }
+$('btnPlaceDZ').addEventListener('click', () => {
+  if (placing === 'D') { placing = null; wiz = null; placeBanner(); syncPlaceBtn(); return; }
+  if (!current.id) return toast('Crée d\'abord une zone (＋ Nouvelle zone)');
+  stopMeasure(); wiz = null; placing = 'D'; syncPlaceBtn(); placeBanner(); closeSheet();
 });
+$('btnDzGps').addEventListener('click', () => { if (!current.id) return toast('Crée d\'abord une zone (＋ Nouvelle zone)'); dzGps(); });
 $('btnDzDel').addEventListener('click', async () => { if (!current.dz) return; if (!(await ask('Supprimer le centre de la DZ ?'))) return; current.dz = null; persist(); fillInputs(); redraw(); });
 $('btnPlaceP').addEventListener('click', () => {
-  if (placing === 'P') { placing = null; placeBanner(); syncPlaceBtn(); return; }
+  if (placing === 'P') { placing = null; wiz = null; placeBanner(); syncPlaceBtn(); return; }
   if (!current.id) return toast('Crée ou ouvre d\'abord une zone');
-  stopMeasure(); placing = 'P'; syncPlaceBtn(); placeBanner(); closeSheet();
+  stopMeasure(); wiz = null; placing = 'P'; syncPlaceBtn(); placeBanner(); closeSheet();
 });
 
 // À l'ouverture d'une zone : vecteur déjà calculé → l'afficher ou mettre à jour à maintenant
@@ -1426,7 +1458,7 @@ function renderZones() {
       zones = zones.filter(x => x.id !== z.id); store.set('vl.zones', zones); if ((typeof Photo !== 'undefined')) Photo.remove(z.id);
       if (current.id === z.id) { // la zone affichée disparaît : carte vide, au même endroit
         current = newZone(map.getCenter()); applyProfile(current); current.zoom = map.getZoom();
-        resetMarkers(); placing = null; persist(); fillInputs(); redraw();
+        resetMarkers(); placing = null; wiz = null; persist(); fillInputs(); redraw();
       }
       renderZones();
     };
@@ -1468,7 +1500,7 @@ function zoneReorder(li, handle) {
 function loadZone(id) {
   const z = zones.find(x => x.id === id); if (!z) return;
   current = upgrade(clone(z)); applyProfile(current);
-  resetMarkers(); placing = null; setBanner(null); stopMeasure();
+  resetMarkers(); placing = null; wiz = null; setBanner(null); stopMeasure();
   map.setBearing(current.bearing || 0);
   map.setView([current.center.lat, current.center.lng], Math.max(current.zoom || 17, 15));
   closeSheet(); fillInputs(); redraw(); persist();
@@ -1494,8 +1526,8 @@ async function startNewZone(center, zoom) {
   zones.push(clone(current)); store.set('vl.zones', zones);
   resetMarkers(); stopMeasure();
   map.setView([center.lat, center.lng], current.zoom);
-  placing = 'P'; fillInputs(); persist(); redraw(); closeSheet();
-  toast(`« ${n} » créée : touche la carte pour placer le point de rendez-vous`);
+  fillInputs(); persist(); closeSheet(); wiz = null; wizGo('D'); /* v0.28.0 : mise en place guidée, centre de la DZ d'abord */
+  toast(`« ${n} » créée : pose d'abord le centre de la DZ`);
 }
 $('btnNewZone').addEventListener('click', () => { $('searchResults').innerHTML = ''; $('nzDlg').classList.remove('hidden'); });
 $('nzCancel').addEventListener('click', () => $('nzDlg').classList.add('hidden'));
@@ -2003,5 +2035,5 @@ Undo.init({ toast, ignore: ['vector'], state: () => ({ key: current.id || '', ob
   restore: o => {
     current = upgrade(Object.assign(o, { center: map.getCenter(), zoom: map.getZoom(), bearing: map.getBearing() }));
     if (current.params) { PROFILE_KEYS.forEach(k => { if (k in current.params) profile[k] = current.params[k]; }); store.set('vl.profile', profile); zones.forEach(applyProfile); }
-    resetMarkers(); placing = null; setBanner(null); stopMeasure(); fillInputs(); /* Henri : ni onglet, ni fenêtre, ni zoom ne changent */ redraw(); persist();
+    resetMarkers(); placing = null; measSusp = null; setBanner(null); stopMeasure(); fillInputs(); if (wiz) { if (!current.id) wiz = null; else wiz = !current.dz ? 'D' : wiz === 'AX' ? 'AX' : 'P'; placing = wiz === 'AX' ? null : wiz; syncPlaceBtn(); } /* ↶ pendant la mise en place : elle continue à l'étape qui correspond */ /* Henri : ni onglet, ni fenêtre, ni zoom ne changent */ redraw(); persist();
   } });

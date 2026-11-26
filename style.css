@@ -225,3 +225,8 @@ button,input,select,label,a{touch-action:manipulation}
 #top .round{flex-shrink:0}
 /* v0.27.1 : nombre de sorties à côté du trait d'ouverture haute des derniers (même format que « ouverture OSO » de trace-isv) */
 .hilab{pointer-events:none}.hilab b{position:absolute;left:0;top:0;white-space:nowrap;font-size:11px;font-weight:700;text-shadow:0 0 3px #000,0 0 3px #000,0 0 2px #000}.hilab b.onlight{text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 2px #fff,0 0 1px #fff}
+/* v0.28.0 : boutons de la mise en place guidée dans le bandeau jaune (comme le pas à pas d'ISV) */
+#banner .bbtns{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;align-items:center;margin-top:6px}
+#banner .bbtns button{background:#111;color:#ffd400;border:1px solid #111;padding:5px 11px;font-weight:700;border-radius:8px;font-size:13px;line-height:1.2}
+#banner .bbtns button.ok{background:#1f7a2e;color:#fff;border-color:#1f7a2e}
+#banner .bbtns .bin{width:90px;padding:4px 6px;font-size:16px;border:1px solid #111;border-radius:7px;text-align:center;background:#fff;color:#111}
