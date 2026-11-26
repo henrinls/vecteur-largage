@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.25.1';
+const VERSION = '0.25.2';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -970,7 +970,7 @@ function syncQuick() {
   $('qRelax').classList.toggle('on', !!current.show.relax); $('qLabel').classList.toggle('on', current.show.label !== false); $('qNm').classList.toggle('on', !!current.show.nm); $('qTicks').classList.toggle('on', !!current.show.rose);
   $('qRev').classList.toggle('on', !!current.reversed);
   $('qPrv').textContent = 'PRV auto'; $('qPrv').classList.toggle('hidden', !current.prvManual); // n'apparaît qu'après un choix manuel
-  $('qVecAuto').classList.toggle('hidden', typeof current.offsetManual !== 'number');
+  $('qVecAuto').classList.toggle('hidden', !vecManual()); /* v0.25.2 (Henri, comme trace-isv) : visible dès que le vecteur est à la main (place, cap, sens) */
   $('qWinds').classList.toggle('on', !$('windsBox').classList.contains('hidden'));
 }
 function quick(fn, msg) { fn(); syncQuick(); persist(); redraw(); if (msg) toast(msg()); }
@@ -981,7 +981,9 @@ $('qRelax').addEventListener('click', () => quick(() => { current.show.relax = !
 $('qRev').addEventListener('click', () => quick(() => { current.reversed = !current.reversed; current.offsetManual = null; },
   () => current.reversed ? (current.axis.on && !current.axis.both ? '⚠️ Sens inversé : la zone n\'autorise pas cet axe dans ce sens' : 'Sens de l\'axe inversé') : 'Sens normal'));
 $('qPrv').addEventListener('click', () => { if (!current.prvManual) return toast('PRV automatique (le plus au vent). Appui long sur un PRV pour le choisir à la main.'); quick(() => { current.prvManual = null; current.offsetManual = null; }, () => 'PRV automatique (le plus au vent)'); });
-$('qVecAuto').addEventListener('click', () => quick(() => { current.offsetManual = null; current.tManual = null; }, () => 'Vecteur replacé au mieux (le plus long)'));
+function vecManual() { return typeof current.offsetManual === 'number' || typeof current.headingOverride === 'number' || !!current.reversed || current.tManual != null; }
+/* « Vect. auto » : tout ce qui a été réglé à la main sur le vecteur revient en automatique (place, cap, sens) ; le PRV garde son propre bouton « PRV auto » et l'axe imposé par la zone reste */
+$('qVecAuto').addEventListener('click', () => quick(() => { current.offsetManual = null; current.tManual = null; current.headingOverride = null; current.reversed = false; }, () => 'Vecteur automatique : cap et place recalculés'));
 
 // ---------- Saut : date, heure, hauteurs (sur la carte) ----------
 function syncJump() {
