@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.25.6';
+const VERSION = '0.25.7';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -480,7 +480,7 @@ function syncCompass() {
   $('btnNorth').classList.toggle('rotated', Math.abs(((b % 360) + 360) % 360) > 0.5);
 }
 let rotT = 0;
-map.on('rotate', () => { syncCompass(); if (typeof drawBarb === 'function') drawBarb(); current.bearing = map.getBearing(); clearTimeout(rotT); rotT = setTimeout(persist, 400); });
+map.on('rotate', () => { syncCompass(); if (typeof drawBarb === 'function') { drawBarb(); drawGreenBarb(); } current.bearing = map.getBearing(); clearTimeout(rotT); rotT = setTimeout(persist, 400); });
 
 const fig = L.layerGroup().addTo(map);
 const grads = L.layerGroup().addTo(map);
@@ -544,7 +544,7 @@ function draw(light) {
     L.marker(a, { interactive: false, zIndexOffset: 600, icon: dotIcon(C_START, 14, '') }).addTo(fig);
     L.marker(b, { interactive: false, zIndexOffset: 600, icon: dotIcon(C_END, 14, '') }).addTo(fig);
   }
-  syncRotHandles();
+  syncRotHandles(); drawGreenBarb();
   placeMarkers();
 }
 /* v0.25.0 (Henri, comme trace-isv) : appui long sur le vert ou le rouge puis glisser = faire TOURNER le vecteur autour de son milieu.
@@ -674,17 +674,40 @@ function barbGeom(kt, C, d, s) {
   return { lines, tris, T };
 }
 function barbBox(g) { const pts = g.lines.flat().concat(g.tris.flat()); if (g.calm) pts.push({ x: g.T.x - 3, y: g.T.y - 3 }, { x: g.T.x + 3, y: g.T.y + 3 }); return { x0: Math.min(...pts.map(q => q.x)), y0: Math.min(...pts.map(q => q.y)), x1: Math.max(...pts.map(q => q.x)), y1: Math.max(...pts.map(q => q.y)) }; }
-function barbWind(toPx) { /* sens écran du vent au sol et sa force (kt) */
-  const w = groundWind(); if (!w || !current.dz) return null;
-  const z = toPx(current.dz), r = (w.dir + 180) * Math.PI / 180, far = toPx(Geo.fromLocal(current.dz, { x: Math.sin(r) * 1000, y: Math.cos(r) * 1000 }));
+function barbWind(toPx, wIn, llIn) { /* sens écran du vent (au sol par défaut, ou wIn au point llIn) et sa force (kt) */
+  const w = wIn || groundWind(), at = llIn || current.dz; if (!w || !at || !isFinite(w.spd) || !isFinite(w.dir)) return null;
+  const z = toPx(at), r = (w.dir + 180) * Math.PI / 180, far = toPx(Geo.fromLocal(at, { x: Math.sin(r) * 1000, y: Math.cos(r) * 1000 }));
   const d = { x: far.x - z.x, y: far.y - z.y }, l = Math.hypot(d.x, d.y) || 1; return { z, d: { x: d.x / l, y: d.y / l }, kt: w.spd * KT };
 }
 /* barbule placée à droite de la cible : bord gauche en x0, centrée verticalement sur cy */
 function barbRight(bw, s, left, cy) { const g0 = barbGeom(bw.kt, { x: 0, y: 0 }, bw.d, s), b = barbBox(g0), dx = left - b.x0, dy = cy - (b.y0 + b.y1) / 2, mv = q => ({ x: q.x + dx, y: q.y + dy });
   return { lines: g0.lines.map(l => l.map(mv)), tris: g0.tris.map(t => t.map(mv)), calm: g0.calm, T: mv(g0.T) }; }
+/* barbule centrée sur (cx, cy) */
+function barbAt(bw, s, cx, cy) { const g0 = barbGeom(bw.kt, { x: 0, y: 0 }, bw.d, s), b = barbBox(g0), dx = cx - (b.x0 + b.x1) / 2, dy = cy - (b.y0 + b.y1) / 2, mv = q => ({ x: q.x + dx, y: q.y + dy });
+  return { lines: g0.lines.map(l => l.map(mv)), tris: g0.tris.map(t => t.map(mv)), calm: g0.calm, T: mv(g0.T) }; }
+function barbSvg(g) { /* élément DOM de la barbule g (coordonnées du marqueur) */
+  const B = barbBox(g), x0 = B.x0 - 2, y0 = B.y0 - 2, x1 = B.x1 + 2, y1 = B.y1 + 2, f = q => `${(q.x - x0).toFixed(1)},${(q.y - y0).toFixed(1)}`, body = g.lines.map(([a, b]) => `M${f(a)}L${f(b)}`).join('');
+  const d = document.createElement('div'); d.className = 'barbIn';
+  Object.assign(d.style, { position: 'absolute', left: `${x0.toFixed(1)}px`, top: `${y0.toFixed(1)}px`, width: `${(x1 - x0).toFixed(1)}px`, height: `${(y1 - y0).toFixed(1)}px`, pointerEvents: 'none' });
+  d.innerHTML = `<svg width="${x1 - x0}" height="${y1 - y0}" style="overflow:visible;display:block"><path d="${body}" stroke="#000" stroke-width="2.6" stroke-linecap="round" fill="none" opacity=".55"/>${g.tris.map(t => `<path d="M${t.map(f).join('L')}Z" fill="#00e5ff" stroke="#000" stroke-width=".6"/>`).join('')}<path d="${body}" stroke="#00e5ff" stroke-width="1.1" stroke-linecap="round" fill="none"/>${g.calm ? `<circle cx="${(g.T.x - x0).toFixed(1)}" cy="${(g.T.y - y0).toFixed(1)}" r="2.5" stroke="#00e5ff" stroke-width="1.1" fill="none"/>` : ''}</svg>`;
+  return d;
+}
+/* v0.25.7 (Henri, comme trace-isv) : barbule du vent À LA HAUTEUR DE LARGAGE à côté du vert, perpendiculairement au vecteur, côté opposé à la ZMT (centre de DZ, sinon PRV) */
+function greenBarbPos(toPx, gap) {
+  const A = toPx(sol.start), B = toPx(sol.end), l = Math.hypot(B.x - A.x, B.y - A.y);
+  let n = l > 0.5 ? { x: -(B.y - A.y) / l, y: (B.x - A.x) / l } : (() => { const q = toPx(Geo.fromLocal(sol.start, { x: sol.u.x * 1000, y: sol.u.y * 1000 })), m = Math.hypot(q.x - A.x, q.y - A.y) || 1; return { x: -(q.y - A.y) / m, y: (q.x - A.x) / m }; })();
+  const Z = toPx(current.dz || sol.prv); if ((Z.x - A.x) * n.x + (Z.y - A.y) * n.y > 0) n = { x: -n.x, y: -n.y };
+  return { A, c: { x: A.x + n.x * gap, y: A.y + n.y * gap } };
+}
+function drawGreenBarb() {
+  const el = rotH.g && rotH.g.getElement(); if (!el) return; el.querySelectorAll('.barbIn').forEach(e => e.remove());
+  if (!sol || !sol.ok || !sol.windRel) return;
+  const px = ll => map.latLngToContainerPoint(LL(ll)), bw = barbWind(px, sol.windRel, sol.start); if (!bw) return;
+  const p = greenBarbPos(px, 24); el.appendChild(barbSvg(barbAt(bw, 1, 20 + p.c.x - p.A.x, 20 + p.c.y - p.A.y)));
+}
 function drawBarb() { /* dans le marqueur du centre de la DZ : suit la cible au zoom, au pincement et au glissement */
-  document.querySelectorAll('.barbIn').forEach(e => e.remove());
   const el = dzMarker && dzMarker.getElement(); if (!el) return;
+  el.querySelectorAll('.barbIn').forEach(e => e.remove()); /* seulement celle de la ZMT (le vert a la sienne) */
   const bw = barbWind(ll => map.latLngToContainerPoint(LL(ll))); if (!bw) return;
   const g = barbRight(bw, 1, 38, 15), B = barbBox(g), x0 = B.x0 - 2, y0 = B.y0 - 2, x1 = B.x1 + 2, y1 = B.y1 + 2, f = q => `${(q.x - x0).toFixed(1)},${(q.y - y0).toFixed(1)}`;
   const body = g.lines.map(([a, b]) => `M${f(a)}L${f(b)}`).join('');
@@ -1685,6 +1708,9 @@ async function renderPdfCanvas() {
     g.save(); g.lineCap = 'round'; g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 10 * u; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
     g.strokeStyle = '#000'; g.lineWidth = 5 * u; g.stroke(); g.restore();
     dot(sol.start, C_START, 9); dot(sol.end, C_END, 9); // même taille que les PRV, comme à l'écran
+    { const bw = sol.windRel && barbWind(toC, sol.windRel, sol.start); if (bw) { const p = greenBarbPos(toC, 24 * u), bg = barbAt(bw, u, p.c.x, p.c.y); g.save(); g.lineCap = 'round'; /* v0.25.7 : vent de largage à côté du vert */
+      const st = (col, w) => { g.strokeStyle = col; g.lineWidth = w; bg.lines.forEach(([p0, q]) => { g.beginPath(); g.moveTo(p0.x, p0.y); g.lineTo(q.x, q.y); g.stroke(); }); if (bg.calm) { g.beginPath(); g.arc(bg.T.x, bg.T.y, 2.5 * u, 0, 2 * Math.PI); g.stroke(); } };
+      st('rgba(0,0,0,.55)', 2.6 * u); bg.tris.forEach(t => { g.beginPath(); g.moveTo(t[0].x, t[0].y); t.slice(1).forEach(q => g.lineTo(q.x, q.y)); g.closePath(); g.fillStyle = '#00e5ff'; g.fill(); g.strokeStyle = '#000'; g.lineWidth = .6 * u; g.stroke(); }); st('#00e5ff', 1.1 * u); g.restore(); } }
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, ne = sol.exits ? sol.exits.n : 1;
     /* PDF : jamais de cartouche sur la carte, tout est dans le bandeau d'informations */ }
   if (current.show.nm && current.dz) { // cercles NM autour de la DZ, comme à l'écran (traits plus épais)
