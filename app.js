@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.27.2';
+const VERSION = '0.27.3';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -903,13 +903,14 @@ function freeRects() {
 }
 // Étiquettes (degrés, chiffres, hauteurs…) : leur débord en pixels au-delà de la figure est réservé en plus,
 // sinon le cadrage serré les cache sous les boutons (« 180° » devenu « 80° », 20 nov. 2026)
-const FIT_LABELS = '.glabel span, .vlabel, .hilab b'; /* v0.27.1 : le nombre de sorties de l'ouverture haute aussi */
+const FIT_LABELS = '.glabel span, .vlabel, .hilab b, .barbIn'; /* 26/11 (Henri) : les barbules comptent aussi dans le zoom optimisé */ /* v0.27.1 : le nombre de sorties de l'ouverture haute aussi */
 function labelOverhang(x0, x1, y0, y1) {
   const o = { l: 0, r: 0, t: 0, b: 0 }; if (!FIT_LABELS) return o;
   const c = map.getContainer().getBoundingClientRect();
   document.querySelectorAll(FIT_LABELS).forEach(el => {
     const r = el.getBoundingClientRect(); if (!r.width || !r.height) return;
     const lx0 = r.left - c.left, lx1 = r.right - c.left, ly0 = r.top - c.top, ly1 = r.bottom - c.top;
+    if (el.classList.contains('barbIn') && (lx1 < x0 - 70 || lx0 > x1 + 70 || ly1 < y0 - 70 || ly0 > y1 + 70)) return; /* barbule d'un point laissé hors du cadrage : ignorée */
     o.l = Math.max(o.l, x0 - lx0); o.r = Math.max(o.r, lx1 - x1); o.t = Math.max(o.t, y0 - ly0); o.b = Math.max(o.b, ly1 - y1);
   });
   return o;
