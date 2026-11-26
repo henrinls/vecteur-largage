@@ -10,7 +10,7 @@ document.addEventListener('focusout', e => {
   if (!e.target || !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   setTimeout(() => { const a = document.activeElement; if (!a || !/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) window.scrollTo(0, 0); }, 60);
 });
-const VERSION = '0.25.0';
+const VERSION = '0.25.1';
 const APP_ID = 'vl';
 // Fonds de carte : Esri (monde entier) ou photos aériennes IGN (France, licence ouverte : hors-ligne et PDF autorisés)
 const BASEMAPS = {
@@ -149,7 +149,7 @@ function upgrade(z) {
   z.axis = Object.assign({ on: false, mag: 0, both: true }, z.axis || {}); delete z.axis.ref;
   if (z.elevManual !== null && typeof z.elevManual !== 'number') z.elevManual = null;
   if (z.prvManual === undefined) z.prvManual = null;
-  if (z.headingOverride === undefined) z.headingOverride = null; // cap vrai imposé à la main (appui long sur le cap)
+  if (z.headingOverride === undefined) z.headingOverride = null; // cap vrai imposé à la main (Zones › Cap de largage, ou rotation par le vert / le rouge)
   z.reversed = !!z.reversed;
   if (z.offsetManual === undefined) z.offsetManual = null;          // vecteur déplacé à la main (décalage latéral, m)
   if (z.tManual === undefined) z.tManual = null;
@@ -685,7 +685,7 @@ function placeMarkers() {
     if (vecHit.line._path && vecHit.attachedEl !== vecHit.line._path) { vecHit.attachedEl = vecHit.line._path; const handle = vecHit.handle;
       longPressDrag(handle, ll => { setManualPoint(ll); draw(true); }, () => { if (sol && sol.ok) { current.offsetManual = sol.offsetUsed; current.tManual = sol.tUsed; } persist(); redraw(); toast('Vecteur déplacé. « Vect. auto » (à gauche) pour revenir au meilleur placement.'); });
     }
-    // Étiquette : cap magnétique et longueur ; appui long sur le cap = le modifier
+    // Étiquette : cap magnétique et longueur
     const mid = labelPos();
     const ne = sol.exits ? sol.exits.n : 1;
     const dtx = sol.exits && sol.exits.dt ? ` · <b class="vexits">${fmt1(sol.exits.dt)} s</b>` : '';
@@ -695,8 +695,7 @@ function placeMarkers() {
     else { vecLabel.setLatLng(LL(mid)); if (vecLabel._html !== html) { vecLabel.setIcon(L.divIcon({ className: 'vlabel', iconSize: [0, 0], html })); vecLabel._html = html; } }
     if (current.show.label === false) { if (map.hasLayer(vecLabel)) map.removeLayer(vecLabel); }
     else if (!map.hasLayer(vecLabel)) vecLabel.addTo(map);
-    // élément recréé par Leaflet quand le cartouche revient sur la carte : rebrancher l'appui long (même piège que le couloir PSV)
-    if (vecLabel.getElement() && vecLabel._lpEl !== vecLabel.getElement()) { vecLabel._lpEl = vecLabel.getElement(); longPressAction(vecLabel, editHeading); }
+    /* v0.25.1 (Henri) : plus d'appui long sur le cartouche (ancienne fenêtre de saisie du cap supprimée) : le cap se règle dans Zones › Cap de largage */
   } else {
     if (vecHit && map.hasLayer(vecHit.line)) map.removeLayer(vecHit.line);
     if (vecLabel && map.hasLayer(vecLabel)) map.removeLayer(vecLabel);
@@ -756,14 +755,6 @@ function syncCapField() {
 document.querySelectorAll('[data-cap]').forEach(b => b.addEventListener('click', () => { const m = capMagNow(); if (m == null) return; setCapMag(Math.round(m) + +b.dataset.cap); }));
 $('z_cap').addEventListener('change', e => { const t = e.target.value.trim(); if (t === '') { current.headingOverride = null; current.reversed = false; current.offsetManual = null; persist(); redraw(); return; } setCapMag(parseFloat(t.replace(',', '.'))); });
 $('z_capAuto').addEventListener('click', () => { current.headingOverride = null; current.reversed = false; current.offsetManual = null; persist(); redraw(); toast('Cap de largage automatique'); });
-async function editHeading() {
-  if (!sol || !sol.ok) return;
-  const res = await ask(`Cap de largage (° magnétiques). Vide = automatique (${sol.why}).`, typeof current.headingOverride === 'number' ? String(Math.round(n360(sol.heading - sol.decl - (current.reversed ? 180 : 0)))) : '');
-  if (res === null) return;
-  if (res === '') current.headingOverride = null;
-  else { const v = parseFloat(res.replace(',', '.')); if (isNaN(v)) return; current.headingOverride = n360(v + sol.decl); }
-  current.reversed = false; current.offsetManual = null; persist(); redraw();
-}
 function addPrv(p) {
   current.prvs.push({ id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), lat: p.lat, lng: p.lng });
   persist(); redraw();
